@@ -53,10 +53,13 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
 
-// public class NAT implements IFloodlightModule, IOFMessageListener {
+import org.projectfloodlight.openflow.protocol.OFMessage;
+import org.projectfloodlight.openflow.protocol.OFType;
 
-// 	protected IFloodlightProviderService floodlightProvider;
-// 	protected static Logger log = LoggerFactory.getLogger( NAT.class );
+public class NAT implements IFloodlightModule, IOFMessageListener {
+
+	protected IFloodlightProviderService floodlightProvider;
+	protected static Logger log = LoggerFactory.getLogger( NAT.class );
 
 //     protected String insideIPsFile;
 //     protected String externalIPFile;
@@ -77,31 +80,31 @@ import java.util.*;
 	
 // 	HashMap<Long, Integer> internalMAC2ip = new HashMap<Long, Integer>(); 
 	
-// 	@Override
-// 	public String getName() {
-// 		// TODO Auto-generated method stub
-// 		return "NAT";
-// 	}
+	@Override
+	public String getName() {
+		// TODO Auto-generated method stub
+		return "NAT";
+	}
 
-// 	@Override
-// 	public boolean isCallbackOrderingPrereq(OFType type, String name) {
-// 		// TODO Auto-generated method stub
-// 		return false;
-// 	}
+	@Override
+	public boolean isCallbackOrderingPrereq(OFType type, String name) {
+		// TODO Auto-generated method stub
+		return false;
+	}
 
-// 	@Override
-// 	public boolean isCallbackOrderingPostreq(OFType type, String name) {
-// 		// TODO Auto-generated method stub
-// 		return false;
-// 	}
+	@Override
+	public boolean isCallbackOrderingPostreq(OFType type, String name) {
+		// TODO Auto-generated method stub
+		return false;
+	}
 
-// 	@Override
-// 	public net.floodlightcontroller.core.IListener.Command receive(
-// 			IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
-// 		// not the NAT switch, continue processing as normal
-// 		if( sw.getId()!=this.nat_swId ){
-// 			return Command.CONTINUE;
-// 		}
+	@Override
+	public net.floodlightcontroller.core.IListener.Command receive(
+			IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
+		// not the NAT switch, continue processing as normal
+		// if( sw.getId()!=this.nat_swId ){
+			return Command.CONTINUE;
+		}
 		
 		
 // 		OFPacketIn pi = (OFPacketIn) msg;
@@ -401,27 +404,27 @@ import java.util.*;
 	
 	
 	
-// 	@Override
-// 	public Collection<Class<? extends IFloodlightService>> getModuleServices() {
-// 		// TODO Auto-generated method stub
-// 		return null;
-// 	}
+	@Override
+	public Collection<Class<? extends IFloodlightService>> getModuleServices() {
+		// TODO Auto-generated method stub
+		return null;
+	}
 
-// 	@Override
-// 	public Map<Class<? extends IFloodlightService>, IFloodlightService> getServiceImpls() {
-// 		// TODO Auto-generated method stub
-// 		return null;
-// 	}
+	@Override
+	public Map<Class<? extends IFloodlightService>, IFloodlightService> getServiceImpls() {
+		// TODO Auto-generated method stub
+		return null;
+	}
 
-// 	@Override
-// 	public Collection<Class<? extends IFloodlightService>> getModuleDependencies() {
-// 		// TODO Auto-generated method stub
-// 		return null;
-// 	}
+	@Override
+	public Collection<Class<? extends IFloodlightService>> getModuleDependencies() {
+		// TODO Auto-generated method stub
+		return null;
+	}
 
-// 	@Override
-// 	public void init(FloodlightModuleContext context)
-// 			throws FloodlightModuleException {
+	@Override
+	public void init(FloodlightModuleContext context)
+			throws FloodlightModuleException {
 // 		final Map<String, String> modConf = context.getConfigParams(this);
 
 // 		// File containing inside IPs
@@ -442,11 +445,11 @@ import java.util.*;
 // 			throw new RuntimeException("No value for configuration parameter 'nat_info_file'!");
 // 		}
 
-// 	}
+	}
 
-// 	@Override
-// 	public void startUp(FloodlightModuleContext context)
-// 			throws FloodlightModuleException {
+	@Override
+	public void startUp(FloodlightModuleContext context)
+			throws FloodlightModuleException {
 // 		// TODO Auto-generated method stub
 // 		System.out.println( "Starting up NAT module" );
 // 		floodlightProvider = context
@@ -514,7 +517,7 @@ import java.util.*;
 // 		}
 		
 		
-// 	}
+	}
 
 // 	/**
 // 	 * @param args
@@ -524,4 +527,4 @@ import java.util.*;
 
 // 	}
 
-// }
+}
