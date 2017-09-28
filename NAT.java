@@ -61,24 +61,24 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 	protected IFloodlightProviderService floodlightProvider;
 	protected static Logger log = LoggerFactory.getLogger( NAT.class );
 
-//     protected String insideIPsFile;
-//     protected String externalIPFile;
-//     protected String natInfoFile;
+    protected String insideIPsFile;
+    protected String externalIPFile;
+    protected String natInfoFile;
 
-// 	protected ArrayList<String> inside_ip = new ArrayList<String>();
-// 	protected String external_ip = null;
+	protected ArrayList<String> inside_ip = new ArrayList<String>();
+	protected String external_ip = null;
 	
-// 	private long nat_swId = -1;
-// 	//switch ports facing inside of nat
-// 	private ArrayList<Short> nat_internal_ports = new ArrayList<Short>();
-// 	//switch ports facing outside of nat
-// 	private ArrayList<Short> nat_external_ports = new ArrayList<Short>();
+	private long nat_swId = -1;
+	//switch ports facing inside of nat
+	private ArrayList<Short> nat_internal_ports = new ArrayList<Short>();
+	//switch ports facing outside of nat
+	private ArrayList<Short> nat_external_ports = new ArrayList<Short>();
 
-// 	HashBiMap<String,String> internal2external = HashBiMap.create();
-// 	//TCP ports already in use
-// 	ArrayList<Short> usedPorts = new ArrayList<Short>();
+	HashBiMap<String,String> internal2external = HashBiMap.create();
+	//TCP ports already in use
+	ArrayList<Short> usedPorts = new ArrayList<Short>();
 	
-// 	HashMap<Long, Integer> internalMAC2ip = new HashMap<Long, Integer>(); 
+	HashMap<Long, Integer> internalMAC2ip = new HashMap<Long, Integer>(); 
 	
 	@Override
 	public String getName() {
@@ -425,96 +425,96 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 	@Override
 	public void init(FloodlightModuleContext context)
 			throws FloodlightModuleException {
-// 		final Map<String, String> modConf = context.getConfigParams(this);
+		final Map<String, String> modConf = context.getConfigParams(this);
 
-// 		// File containing inside IPs
-// 		this.insideIPsFile = modConf.get("inside_ips_file");
-// 		if (this.insideIPsFile == null) {
-// 			throw new RuntimeException("No value for configuration parameter 'inside_ips_file'!");
-// 		}
+		// File containing inside IPs
+		this.insideIPsFile = modConf.get("inside_ips_file");
+		if (this.insideIPsFile == null) {
+			throw new RuntimeException("No value for configuration parameter 'inside_ips_file'!");
+		}
 
-// 		// File containing external IP
-// 		this.externalIPFile = modConf.get("external_ip_file");
-// 		if (this.externalIPFile == null) {
-// 			throw new RuntimeException("No value for configuration parameter 'external_ip_file'!");
-// 		}
+		// File containing external IP
+		this.externalIPFile = modConf.get("external_ip_file");
+		if (this.externalIPFile == null) {
+			throw new RuntimeException("No value for configuration parameter 'external_ip_file'!");
+		}
 
-// 		// File containing NAT info
-// 		this.natInfoFile = modConf.get("nat_info_file");
-// 		if (this.natInfoFile == null) {
-// 			throw new RuntimeException("No value for configuration parameter 'nat_info_file'!");
-// 		}
+		// File containing NAT info
+		this.natInfoFile = modConf.get("nat_info_file");
+		if (this.natInfoFile == null) {
+			throw new RuntimeException("No value for configuration parameter 'nat_info_file'!");
+		}
 
 	}
 
 	@Override
 	public void startUp(FloodlightModuleContext context)
 			throws FloodlightModuleException {
-// 		// TODO Auto-generated method stub
-// 		System.out.println( "Starting up NAT module" );
-// 		floodlightProvider = context
-// 				.getServiceImpl(IFloodlightProviderService.class);
+		// TODO Auto-generated method stub
+		System.out.println( "Starting up NAT module" );
+		floodlightProvider = context
+				.getServiceImpl(IFloodlightProviderService.class);
 		
-//         floodlightProvider.addOFMessageListener(OFType.PACKET_IN, this);
+        floodlightProvider.addOFMessageListener(OFType.PACKET_IN, this);
 		
-// 		BufferedReader reader;
-// 		try
-// 		{
-// 			//read in internal ip addresses
-// 			reader = new BufferedReader(new FileReader(new File(this.insideIPsFile)));
-// 			String temp = null;
-// 			while ((temp = reader.readLine()) != null)
-// 			{
-// 				if( !temp.startsWith("//") ){
-// 					inside_ip.add(temp);
-// 				}
-// 			}
-// 			reader.close();
+		BufferedReader reader;
+		try
+		{
+			//read in internal ip addresses
+			reader = new BufferedReader(new FileReader(new File(this.insideIPsFile)));
+			String temp = null;
+			while ((temp = reader.readLine()) != null)
+			{
+				if( !temp.startsWith("//") ){
+					inside_ip.add(temp);
+				}
+			}
+			reader.close();
 
-// 			//read in externally visible ip addresses
-// 			reader = new BufferedReader(new FileReader(new File(this.externalIPFile)));
-// 			temp = null;
-// 			while ((temp = reader.readLine()) != null)
-// 			{
-// 				if( !temp.startsWith("//") ){
-// 					external_ip = temp;
-// 					// assume one line and at the first line
-// 					break;
-// 				}
-// 			}
-// 			reader.close();
+			//read in externally visible ip addresses
+			reader = new BufferedReader(new FileReader(new File(this.externalIPFile)));
+			temp = null;
+			while ((temp = reader.readLine()) != null)
+			{
+				if( !temp.startsWith("//") ){
+					external_ip = temp;
+					// assume one line and at the first line
+					break;
+				}
+			}
+			reader.close();
 			
-// 			//read in NAT switch id, inside ports, outside ports
-// 			reader = new BufferedReader(new FileReader(new File(this.natInfoFile)));
-// 			temp = null;
-// 			System.out.println( "NAT info:" );
-// 			while ((temp = reader.readLine()) != null)
-// 			{
-// 				if( !temp.startsWith("//") ){
-// 					String[] nat_info = temp.split( "," );
+			//read in NAT switch id, inside ports, outside ports
+			reader = new BufferedReader(new FileReader(new File(this.natInfoFile)));
+			temp = null;
+			System.out.println( "NAT info:" );
+			while ((temp = reader.readLine()) != null)
+			{
+				if( !temp.startsWith("//") ){
+					String[] nat_info = temp.split( "," );
 					
-// 					nat_swId = Long.valueOf( nat_info[0] );
-// 					System.out.println( "\tSwitchID: " + nat_swId );
+					nat_swId = Long.valueOf( nat_info[0] );
+					System.out.println( "\tSwitchID: " + nat_swId );
 					
-// 					for( String internal_port: nat_info[1].trim().split(" ") ){
-// 						nat_internal_ports.add( Short.valueOf(internal_port) );
-// 					}
-// 					System.out.println( "\tInternal ports: " + nat_internal_ports.toString() );
+					for( String internal_port: nat_info[1].trim().split(" ") ){
+						nat_internal_ports.add( Short.valueOf(internal_port) );
+					}
+					System.out.println( "\tInternal ports: " + nat_internal_ports.toString() );
 					
-// 					for( String external_port: nat_info[2].trim().split(" ") ){
-// 						nat_external_ports.add( Short.valueOf(external_port) );
-// 					}
-// 					System.out.println( "\tExternal ports:" + nat_external_ports.toString() );
-// 					// assume one line and at the first line
-// 					break;
-// 				}
-// 			}
-// 			reader.close();
+					for( String external_port: nat_info[2].trim().split(" ") ){
+						nat_external_ports.add( Short.valueOf(external_port) );
+					}
+					System.out.println( "\tExternal ports:" + nat_external_ports.toString() );
+					// assume one line and at the first line
+					break;
+				}
+			}
+			reader.close();
 			
-// 		} catch (IOException e)
-// 		{
-// 			e.printStackTrace();
-// 		}
+		} catch (IOException e)
+		{
+			e.printStackTrace();
+		}
 		
 		
 	}
