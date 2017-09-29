@@ -267,32 +267,32 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         return null; // TODO: SAIM - REMOVE THIS
 	}
 	
-	// /**
-	//  * Gets the external port for an internal <IP Address, Source Port>.
-	//  * If a port has already been allocated, returns that port. Otherwise,
-	//  * allocates a new, unused port for this address/port combo.
-	//  * @param srcIp
-	//  * @param srcPort
-	//  * @return
-	//  */
-	// private short getExternalPort( IPv4Address srcIp, short srcPort ){
- //    	short natPort;
- //    	String key = IPv4.fromIPv4Address(srcIp) + ":" + srcPort;
- //    	if( internal2external.containsKey(key) ){
- //    		natPort = Short.parseShort( internal2external.get( key ).split(":")[1] );
- //    	}
- //    	else{
- //    		Random random = new Random();
- //    		natPort = (short) (random.nextInt(1000)+1024);
- //    		while( usedPorts.contains(natPort) ){
- //    			natPort = (short) (random.nextInt(1000)+1024);
- //    		}
- //    		usedPorts.add( natPort );
- //    		String value = external_ip + ":" + natPort;
- //        	this.internal2external.put( key, value );
- //    	}
- //    	return natPort;
-	// }
+	/**
+	 * Gets the external port for an internal <IP Address, Source Port>.
+	 * If a port has already been allocated, returns that port. Otherwise,
+	 * allocates a new, unused port for this address/port combo.
+	 * @param srcIp
+	 * @param srcPort
+	 * @return
+	 */
+	private TransportPort getExternalPort( IPv4Address srcIp, TransportPort srcPort ){
+    	TransportPort natPort;
+    	String key =srcIp.toString() + ":" + srcPort.toString();
+    	if( internal2external.containsKey(key) ){
+    		natPort = TransportPort.of( Integer.parseInt(internal2external.get( key ).split(":")[1]) );
+    	}
+    	else{
+    		Random random = new Random();
+    		natPort = TransportPort.of (random.nextInt(1000)+1024);
+    		while( usedPorts.contains(natPort) ){
+    			natPort = TransportPort.of (random.nextInt(1000)+1024);
+    		}
+    		usedPorts.add( natPort );
+    		String value = this.external_ip + ":" + natPort;
+        	this.internal2external.put( key, value );
+    	}
+    	return natPort;
+	}
 	
 // 	private void installFlowMods(IOFSwitch sw, OFPacketIn msg, FloodlightContext cntx,
 // 			int internalAddress, short internalPort, short externalPort){
