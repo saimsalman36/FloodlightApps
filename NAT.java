@@ -55,6 +55,12 @@ import java.util.*;
 
 import org.projectfloodlight.openflow.protocol.OFMessage;
 import org.projectfloodlight.openflow.protocol.OFType;
+import org.projectfloodlight.openflow.protocol.OFPacketIn;
+
+import org.projectfloodlight.openflow.types.IPv4Address;
+import org.projectfloodlight.openflow.types.EthType;
+import org.projectfloodlight.openflow.types.DatapathId;
+import org.projectfloodlight.openflow.types.OFPort;
 
 public class NAT implements IFloodlightModule, IOFMessageListener {
 
@@ -65,18 +71,18 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
     protected String externalIPFile;
     protected String natInfoFile;
 
-	protected ArrayList<String> inside_ip = new ArrayList<String>();
-	protected String external_ip = null;
+	protected ArrayList<IPv4Address> inside_ip = new ArrayList<IPv4Address>();
+	protected IPv4Address external_ip = null;
 	
-	private long nat_swId = -1;
+	private DatapathId nat_swId = null;
 	//switch ports facing inside of nat
-	private ArrayList<Short> nat_internal_ports = new ArrayList<Short>();
+	private ArrayList<OFPort> nat_internal_ports = new ArrayList<OFPort>();
 	//switch ports facing outside of nat
-	private ArrayList<Short> nat_external_ports = new ArrayList<Short>();
+	private ArrayList<OFPort> nat_external_ports = new ArrayList<OFPort>();
 
 	HashBiMap<String,String> internal2external = HashBiMap.create();
 	//TCP ports already in use
-	ArrayList<Short> usedPorts = new ArrayList<Short>();
+	ArrayList<OFPort> usedPorts = new ArrayList<OFPort>();
 	
 	HashMap<Long, Integer> internalMAC2ip = new HashMap<Long, Integer>(); 
 	
@@ -102,34 +108,32 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 	public net.floodlightcontroller.core.IListener.Command receive(
 			IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
 		// not the NAT switch, continue processing as normal
-		// if( sw.getId()!=this.nat_swId ){
+		if( sw.getId()!=this.nat_swId ){
 			return Command.CONTINUE;
 		}
 		
 		
-// 		OFPacketIn pi = (OFPacketIn) msg;
-		
-// 	Ethernet eth = new Ethernet();
-// 	eth.deserialize(pi.getPacketData(), 0, pi.getPacketData().length);
-//     	//Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
-//     	if( eth.getEtherType()==Ethernet.TYPE_IPv4 || eth.getEtherType()==Ethernet.TYPE_ARP)
-//     		System.err.println( "Switch " +sw.getId() + ":" + eth.toString() );
-//     	if( eth.getEtherType() == Ethernet.TYPE_IPv4 ){
-//             /* We got an IPv4 packet; get the payload from Ethernet */
-//             IPv4 ipv4 = (IPv4) eth.getPayload();
-//             short[] ports = networkTranslator( ipv4, sw, pi, cntx );
-//             if(ports!=null){
-//             	installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
-//             }
-//         }
-//     	else if( eth.getEtherType()== Ethernet.TYPE_ARP ){
-//     		handleARP( sw, pi, cntx );
-//     	}
-//     	else{
-//     		//log.info( "Unsupported packet type: " + Integer.toHexString(eth.getEtherType() & 0xffff) );
-//     	}
-// 		return Command.STOP;
-// 	}
+		OFPacketIn pi = (OFPacketIn) msg;
+    	Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
+
+    	if( eth.getEtherType()==EthType.IPv4 || eth.getEtherType()==EthType.ARP)
+    		System.err.println( "Switch " +sw.getId() + ":" + eth.toString() );
+    	if( eth.getEtherType() == EthType.IPv4 ){
+            /* We got an IPv4 packet; get the payload from Ethernet */
+            IPv4 ipv4 = (IPv4) eth.getPayload();
+            // short[] ports = networkTranslator( ipv4, sw, pi, cntx );
+            // if(ports!=null){
+            	// installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
+            // }
+        }
+    	// else if( eth.getEtherType()== Ethernet.TYPE_ARP ){
+    	// 	handleARP( sw, pi, cntx );
+    	// }
+    	// else{
+    	// 	//log.info( "Unsupported packet type: " + Integer.toHexString(eth.getEtherType() & 0xffff) );
+    	// }
+		return Command.STOP;
+	}
 
 // 	private void handleARP( IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
 
@@ -466,7 +470,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 			while ((temp = reader.readLine()) != null)
 			{
 				if( !temp.startsWith("//") ){
-					inside_ip.add(temp);
+					inside_ip.add(IPv4Address.of(temp));
 				}
 			}
 			reader.close();
@@ -477,7 +481,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 			while ((temp = reader.readLine()) != null)
 			{
 				if( !temp.startsWith("//") ){
-					external_ip = temp;
+					external_ip = IPv4Address.of(temp);
 					// assume one line and at the first line
 					break;
 				}
@@ -493,16 +497,16 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 				if( !temp.startsWith("//") ){
 					String[] nat_info = temp.split( "," );
 					
-					nat_swId = Long.valueOf( nat_info[0] );
+					nat_swId = DatapathId.of(Long.valueOf( nat_info[0] ));
 					System.out.println( "\tSwitchID: " + nat_swId );
 					
 					for( String internal_port: nat_info[1].trim().split(" ") ){
-						nat_internal_ports.add( Short.valueOf(internal_port) );
+						nat_internal_ports.add( OFPort.of( Integer.parseInt(internal_port)) );
 					}
 					System.out.println( "\tInternal ports: " + nat_internal_ports.toString() );
 					
 					for( String external_port: nat_info[2].trim().split(" ") ){
-						nat_external_ports.add( Short.valueOf(external_port) );
+						nat_external_ports.add( OFPort.of( Integer.parseInt(external_port)) );
 					}
 					System.out.println( "\tExternal ports:" + nat_external_ports.toString() );
 					// assume one line and at the first line
