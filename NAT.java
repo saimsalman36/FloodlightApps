@@ -123,7 +123,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
     	if( eth.getEtherType() == EthType.IPv4 ){
             /* We got an IPv4 packet; get the payload from Ethernet */
             IPv4 ipv4 = (IPv4) eth.getPayload();
-            short[] ports = networkTranslator( ipv4, sw, pi, cntx );
+            TransportPort[] ports = networkTranslator( ipv4, sw, pi, cntx );
             // if(ports!=null){
             	// installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
             // }
@@ -234,7 +234,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 // 	}
 	
 	
-	private short[] networkTranslator( IPv4 ipv4, IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
+	private TransportPort[] networkTranslator( IPv4 ipv4, IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
         if( ipv4.getProtocol()!=IpProtocol.TCP ){
         	log.info( "Dropping non-TCP packet" );
         	return null;
@@ -246,25 +246,23 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
     	TransportPort srcPort = tcp.getSourcePort();
     	TransportPort dstPort = tcp.getDestinationPort();
 
-    	// if( inside_ip.contains(IPv4.fromIPv4Address(srcIp)) ){
-     //    	System.err.println( "headed out of the NAT" );
-     //    	short natPort = getExternalPort( srcIp, srcPort );
-     //    	return new short[]{srcPort,natPort};
-     //    }
-    	// else if( IPv4.fromIPv4Address(dstIp).equals(external_ip) ){
-     //    	System.err.println( "headed behind the NAT" );
-     //    	//should never reach here, all connections should be initiated from within NAT
-     //    	return null;
-     //    }
-     //    else{
-     //    	//should never reach here
-     //    	log.error( "Should never reach here, but it reached here..." );
-     //    	log.error( "Source IP Adress:" + IPv4.fromIPv4Address(srcIp) );
-     //    	log.error( "Destination IP Address:" + IPv4.fromIPv4Address(dstIp) );
-     //    	return null;
-     //    }
-
-        return null; // TODO: SAIM - REMOVE THIS
+    	if( inside_ip.contains(srcIp) ){
+        	System.err.println( "headed out of the NAT" );
+        	TransportPort natPort = getExternalPort( srcIp, srcPort );
+        	return new TransportPort[]{srcPort,natPort};
+        }
+    	else if( dstIp.equals(external_ip) ){
+        	System.err.println( "headed behind the NAT" );
+        	//should never reach here, all connections should be initiated from within NAT
+        	return null;
+        }
+        else{
+        	//should never reach here
+        	log.error( "Should never reach here, but it reached here..." );
+        	log.error( "Source IP Adress:" + srcIp );
+        	log.error( "Destination IP Address:" + dstIp );
+        	return null;
+        }
 	}
 	
 	/**
