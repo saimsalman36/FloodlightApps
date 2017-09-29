@@ -60,7 +60,9 @@ import org.projectfloodlight.openflow.protocol.OFPacketIn;
 import org.projectfloodlight.openflow.types.IPv4Address;
 import org.projectfloodlight.openflow.types.EthType;
 import org.projectfloodlight.openflow.types.DatapathId;
-import org.projectfloodlight.openflow.types.OFPort;
+// import org.projectfloodlight.openflow.types.OFPort;
+import org.projectfloodlight.openflow.types.IpProtocol;
+import org.projectfloodlight.openflow.types.TransportPort;
 
 public class NAT implements IFloodlightModule, IOFMessageListener {
 
@@ -76,13 +78,13 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 	
 	private DatapathId nat_swId = null;
 	//switch ports facing inside of nat
-	private ArrayList<OFPort> nat_internal_ports = new ArrayList<OFPort>();
+	private ArrayList<TransportPort> nat_internal_ports = new ArrayList<TransportPort>();
 	//switch ports facing outside of nat
-	private ArrayList<OFPort> nat_external_ports = new ArrayList<OFPort>();
+	private ArrayList<TransportPort> nat_external_ports = new ArrayList<TransportPort>();
 
 	HashBiMap<String,String> internal2external = HashBiMap.create();
 	//TCP ports already in use
-	ArrayList<OFPort> usedPorts = new ArrayList<OFPort>();
+	ArrayList<TransportPort> usedPorts = new ArrayList<TransportPort>();
 	
 	HashMap<Long, Integer> internalMAC2ip = new HashMap<Long, Integer>(); 
 	
@@ -121,7 +123,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
     	if( eth.getEtherType() == EthType.IPv4 ){
             /* We got an IPv4 packet; get the payload from Ethernet */
             IPv4 ipv4 = (IPv4) eth.getPayload();
-            // short[] ports = networkTranslator( ipv4, sw, pi, cntx );
+            short[] ports = networkTranslator( ipv4, sw, pi, cntx );
             // if(ports!=null){
             	// installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
             // }
@@ -232,63 +234,65 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 // 	}
 	
 	
-// 	private short[] networkTranslator( IPv4 ipv4, IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
-//         if( ipv4.getProtocol()!=IPv4.PROTOCOL_TCP ){
-//         	log.info( "Dropping non-TCP packet" );
-//         	return null;
-//         }
-//     	TCP tcp = (TCP) ipv4.getPayload();
-//         int srcIp = ipv4.getSourceAddress();
-//         int dstIp = ipv4.getDestinationAddress();
+	private short[] networkTranslator( IPv4 ipv4, IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
+        if( ipv4.getProtocol()!=IpProtocol.TCP ){
+        	log.info( "Dropping non-TCP packet" );
+        	return null;
+        }
+    	TCP tcp = (TCP) ipv4.getPayload();
+        IPv4Address srcIp = ipv4.getSourceAddress();
+        IPv4Address dstIp = ipv4.getDestinationAddress();
 
-//     	short srcPort = tcp.getSourcePort();
-//     	short dstPort = tcp.getDestinationPort();
+    	TransportPort srcPort = tcp.getSourcePort();
+    	TransportPort dstPort = tcp.getDestinationPort();
 
-//     	if( inside_ip.contains(IPv4.fromIPv4Address(srcIp)) ){
-//         	System.err.println( "headed out of the NAT" );
-//         	short natPort = getExternalPort( srcIp, srcPort );
-//         	return new short[]{srcPort,natPort};
-//         }
-//     	else if( IPv4.fromIPv4Address(dstIp).equals(external_ip) ){
-//         	System.err.println( "headed behind the NAT" );
-//         	//should never reach here, all connections should be initiated from within NAT
-//         	return null;
-//         }
-//         else{
-//         	//should never reach here
-//         	log.error( "Should never reach here, but it reached here..." );
-//         	log.error( "Source IP Adress:" + IPv4.fromIPv4Address(srcIp) );
-//         	log.error( "Destination IP Address:" + IPv4.fromIPv4Address(dstIp) );
-//         	return null;
-//         }
-// 	}
+    	// if( inside_ip.contains(IPv4.fromIPv4Address(srcIp)) ){
+     //    	System.err.println( "headed out of the NAT" );
+     //    	short natPort = getExternalPort( srcIp, srcPort );
+     //    	return new short[]{srcPort,natPort};
+     //    }
+    	// else if( IPv4.fromIPv4Address(dstIp).equals(external_ip) ){
+     //    	System.err.println( "headed behind the NAT" );
+     //    	//should never reach here, all connections should be initiated from within NAT
+     //    	return null;
+     //    }
+     //    else{
+     //    	//should never reach here
+     //    	log.error( "Should never reach here, but it reached here..." );
+     //    	log.error( "Source IP Adress:" + IPv4.fromIPv4Address(srcIp) );
+     //    	log.error( "Destination IP Address:" + IPv4.fromIPv4Address(dstIp) );
+     //    	return null;
+     //    }
+
+        return null; // TODO: SAIM - REMOVE THIS
+	}
 	
-// 	/**
-// 	 * Gets the external port for an internal <IP Address, Source Port>.
-// 	 * If a port has already been allocated, returns that port. Otherwise,
-// 	 * allocates a new, unused port for this address/port combo.
-// 	 * @param srcIp
-// 	 * @param srcPort
-// 	 * @return
-// 	 */
-// 	private short getExternalPort( int srcIp, short srcPort ){
-//     	short natPort;
-//     	String key = IPv4.fromIPv4Address(srcIp) + ":" + srcPort;
-//     	if( internal2external.containsKey(key) ){
-//     		natPort = Short.parseShort( internal2external.get( key ).split(":")[1] );
-//     	}
-//     	else{
-//     		Random random = new Random();
-//     		natPort = (short) (random.nextInt(1000)+1024);
-//     		while( usedPorts.contains(natPort) ){
-//     			natPort = (short) (random.nextInt(1000)+1024);
-//     		}
-//     		usedPorts.add( natPort );
-//     		String value = external_ip + ":" + natPort;
-//         	this.internal2external.put( key, value );
-//     	}
-//     	return natPort;
-// 	}
+	// /**
+	//  * Gets the external port for an internal <IP Address, Source Port>.
+	//  * If a port has already been allocated, returns that port. Otherwise,
+	//  * allocates a new, unused port for this address/port combo.
+	//  * @param srcIp
+	//  * @param srcPort
+	//  * @return
+	//  */
+	// private short getExternalPort( IPv4Address srcIp, short srcPort ){
+ //    	short natPort;
+ //    	String key = IPv4.fromIPv4Address(srcIp) + ":" + srcPort;
+ //    	if( internal2external.containsKey(key) ){
+ //    		natPort = Short.parseShort( internal2external.get( key ).split(":")[1] );
+ //    	}
+ //    	else{
+ //    		Random random = new Random();
+ //    		natPort = (short) (random.nextInt(1000)+1024);
+ //    		while( usedPorts.contains(natPort) ){
+ //    			natPort = (short) (random.nextInt(1000)+1024);
+ //    		}
+ //    		usedPorts.add( natPort );
+ //    		String value = external_ip + ":" + natPort;
+ //        	this.internal2external.put( key, value );
+ //    	}
+ //    	return natPort;
+	// }
 	
 // 	private void installFlowMods(IOFSwitch sw, OFPacketIn msg, FloodlightContext cntx,
 // 			int internalAddress, short internalPort, short externalPort){
@@ -501,12 +505,12 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 					System.out.println( "\tSwitchID: " + nat_swId );
 					
 					for( String internal_port: nat_info[1].trim().split(" ") ){
-						nat_internal_ports.add( OFPort.of( Integer.parseInt(internal_port)) );
+						nat_internal_ports.add( TransportPort.of( Integer.parseInt(internal_port)) );
 					}
 					System.out.println( "\tInternal ports: " + nat_internal_ports.toString() );
 					
 					for( String external_port: nat_info[2].trim().split(" ") ){
-						nat_external_ports.add( OFPort.of( Integer.parseInt(external_port)) );
+						nat_external_ports.add( TransportPort.of( Integer.parseInt(external_port)) );
 					}
 					System.out.println( "\tExternal ports:" + nat_external_ports.toString() );
 					// assume one line and at the first line
