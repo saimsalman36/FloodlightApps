@@ -121,8 +121,6 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
 // not the NAT switch, continue processing as normal
         if( !sw.getId().equals(this.nat_swId) ){
-            System.out.println(sw.getId());
-            System.out.println(nat_swId);
             return Command.CONTINUE;
         }		
 
@@ -130,7 +128,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
 
         if( eth.getEtherType()==EthType.IPv4 || eth.getEtherType()==EthType.ARP)
-            System.err.println( "Switch " +sw.getId() + ":" + eth.toString() );
+            // System.err.println( "Switch " +sw.getId() + ":" + eth.toString() );
         if( eth.getEtherType() == EthType.IPv4 ){
             /* We got an IPv4 packet; get the payload from Ethernet */
             IPv4 ipv4 = (IPv4) eth.getPayload();
@@ -139,111 +137,14 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
                 installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
             }
         }
-        // else if( eth.getEtherType()== EthType.ARP ){
-        // 	handleARP( sw, pi, cntx );
-        // }
-        // else{
-        // 	// log.info( "Unsupported packet type: " + Integer.toHexString(eth.getEtherType() & 0xffff) );
-        // }
+        else if( eth.getEtherType()== EthType.ARP ){
+        	handleARP( sw, pi, cntx );
+        }
+        else{
+        	// log.info( "Unsupported packet type: " + Integer.toHexString(eth.getEtherType() & 0xffff) );
+        }
         return Command.STOP;
     }
-
-	private void handleARP( IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
-
-		Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);;
-		// eth.deserialize(pi.getPacketData(), 0, pi.getPacketData().length);
-		//Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
-		ARP arp = (ARP) eth.getPayload();
-        OFFactory myFactory = sw.getOFFactory();
-		System.err.println( arp.toString() );
-
-		if (inside_ip.contains(arp.getSenderProtocolAddress())) {
-
-			internalMAC2ip.put( arp.getSenderHardwareAddress(), arp.getSenderProtocolAddress() );
-			arp.setSenderProtocolAddress( external_ip );
-			if( arp.getTargetHardwareAddress().getLong()==0 ){
-				arp.setTargetHardwareAddress( eth.getDestinationMACAddress() );//Ethernet.toMACAddress("ff:ff:ff:ff:ff:ff") );
-			}
-			// generate ARP request
-			IPacket arpRequest = new Ethernet()
-				.setSourceMACAddress(arp.getSenderHardwareAddress())
-				.setDestinationMACAddress(arp.getTargetHardwareAddress())
-				.setEtherType(EthType.ARP)
-				.setPriorityCode(eth.getPriorityCode())
-				.setPayload( arp );
-
-			//make packet out action
-            OFPacketOut.Builder po = myFactory.buildPacketOut().getMessage(OFType.PACKET_OUT);    
-	        po.setBufferId(OFPacketOut.BUFFER_ID_NONE).setInPort(pi.getInPort());
-
-	        ArrayList<OFAction> actions = new ArrayList<OFAction>();
-	        for( Short externalNATSwitchPort: this.nat_external_ports ){
-	        	OFActionOutput action = new OFActionOutput();
-	        	action.setPort( externalNATSwitchPort );
-	        	actions.add( action );
-	        }       
-	        po.setActions(actions);
-	        po.setActionsLength( (short) (nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH) );
-	        byte[] packetData = arpRequest.serialize();
-            po.setPacketData(packetData);
-            po.setLength(U16.t(OFPacketOut.MINIMUM_LENGTH
-                    + po.getActionsLength() + packetData.length));
-            System.out.println( po.toString() );
-	        try {
-	            sw.write(po, null);
-	            sw.flush();
-	        } catch (IOException e) {
-	            log.error("Failure writing PacketOut", e);
-	        }
-
-		}
-		else if(IPv4.fromIPv4Address(IPv4.toIPv4Address(arp.getTargetProtocolAddress())).equals(external_ip)){
-			log.info( "Not originating from within NAT, target IP is NAT IP\n");
-			long dstMAC = Ethernet.toLong(eth.getDestinationMACAddress());
-			if( !internalMAC2ip.containsKey( dstMAC) ){
-				log.info( "Not forwarding. Outside host trying to initiate contact to inside host" );
-				return;
-			}
-			int dstTrueIP = internalMAC2ip.get( dstMAC );
-			arp.setTargetProtocolAddress( dstTrueIP );
-
-			log.info( arp.toString() );
-			// generate ARP request
-			IPacket arpReply = new Ethernet()
-				.setSourceMACAddress(arp.getSenderHardwareAddress())
-				.setDestinationMACAddress(arp.getTargetHardwareAddress())
-				.setEtherType(Ethernet.TYPE_ARP)
-				.setPriorityCode(eth.getPriorityCode())
-				.setPayload( arp );
-
-			//make packet out action
-			OFPacketOut po = (OFPacketOut) floodlightProvider.getOFMessageFactory()
-					.getMessage(OFType.PACKET_OUT);    
-			po.setBufferId(OFPacketOut.BUFFER_ID_NONE).setInPort(pi.getInPort());
-
-			ArrayList<OFAction> actions = new ArrayList<OFAction>();
-			for( Short internalNATSwitchPort: this.nat_internal_ports ){
-				OFActionOutput action = new OFActionOutput();
-				action.setPort( internalNATSwitchPort );
-				actions.add( action );
-			}       
-			po.setActions(actions);
-			po.setActionsLength( (short) (nat_internal_ports.size()*OFActionOutput.MINIMUM_LENGTH) );
-			byte[] packetData = arpReply.serialize();
-			po.setPacketData(pi.getPacketData());
-			po.setLength(U16.t(OFPacketOut.MINIMUM_LENGTH
-					+ po.getActionsLength() + packetData.length));
-
-			try {
-				sw.write(po, null);
-				sw.flush();
-			} catch (IOException e) {
-				log.error("Failure writing PacketOut", e);
-			}
-		}
-
-
-	}
 
 
     private TransportPort[] networkTranslator( IPv4 ipv4, IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
@@ -362,7 +263,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         actionListReverse.add(sw.getOFFactory().actions().setTpDst(internalPort));
 
         for( TransportPort externalNATSwitchPort: this.nat_internal_ports ){
-            OFActionOutput action = actions.buildOutput()
+            OFActionOutput action = actionsReverse.buildOutput()
             .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
             .build();
             actionListReverse.add( action );
@@ -375,6 +276,97 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         .build();
 
         sw.write(flowModReverse);
+    }
+
+    private void handleARP( IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
+
+        Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
+        ARP arp = (ARP) eth.getPayload();
+        OFFactory myFactory = sw.getOFFactory();
+
+        System.err.println("ARP PACKET: " + arp);
+
+        if (!((arp.getTargetProtocolAddress()).equals(external_ip))) {
+            if (this.nat_external_ports.contains(TransportPort.of(pi.getInPort().getPortNumber()))) {
+                log.info( "Not forwarding. Outside host trying to initiate contact to inside host" );
+                return;
+            }
+
+            internalMAC2ip.put( arp.getSenderHardwareAddress(), arp.getSenderProtocolAddress() );
+            arp.setSenderProtocolAddress( external_ip );
+            System.err.println(arp.getTargetHardwareAddress());
+            if( arp.getTargetHardwareAddress().getLong()==0 ){
+                System.err.println(eth.getDestinationMACAddress());
+                arp.setTargetHardwareAddress( eth.getDestinationMACAddress() );//Ethernet.toMACAddress("ff:ff:ff:ff:ff:ff") );
+            }
+
+            IPacket arpRequest = new Ethernet()
+                .setSourceMACAddress(arp.getSenderHardwareAddress())
+                .setDestinationMACAddress(arp.getTargetHardwareAddress())
+                .setEtherType(EthType.ARP)
+                .setPriorityCode(eth.getPriorityCode())
+                .setPayload( arp );
+
+            ArrayList<OFAction> actionList = new ArrayList<OFAction>();
+            OFActions actions = myFactory.actions();
+
+            for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
+                OFActionOutput action = actions.buildOutput()
+                .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+                .build();
+                actionList.add( action );
+            }
+
+            OFPacketOut po = myFactory.buildPacketOut()
+            .setBufferId(OFBufferId.NO_BUFFER)
+            .setInPort(pi.getInPort())
+            .setData(arpRequest.serialize())
+            .setActions(actionList)
+            .build();
+
+            sw.write(po);
+
+        }
+        else if((arp.getTargetProtocolAddress()).equals(external_ip)) {
+            MacAddress srcMAC =  eth.getSourceMACAddress();
+
+            MacAddress dstMAC = eth.getDestinationMACAddress();
+            IPv4Address dstTrueIP = internalMAC2ip.get( dstMAC );
+
+            if( !internalMAC2ip.containsKey( dstMAC) ){
+               log.info( "Not forwarding. Outside host trying to initiate contact to inside host" );
+               return;
+           }
+
+            arp.setTargetProtocolAddress( dstTrueIP );
+
+            // generate ARP request
+            IPacket arpReply = new Ethernet()
+                .setSourceMACAddress(arp.getSenderHardwareAddress())
+                .setDestinationMACAddress(arp.getTargetHardwareAddress())
+                .setEtherType(EthType.ARP)
+                .setPriorityCode(eth.getPriorityCode())
+                .setPayload( arp );
+
+            ArrayList<OFAction> actionList = new ArrayList<OFAction>();
+            OFActions actions = myFactory.actions();
+
+            for( TransportPort internalNATSwitchPort: this.nat_internal_ports ){
+                OFActionOutput action = actions.buildOutput()
+                .setPort( OFPort.of(internalNATSwitchPort.getPort()) )
+                .build();
+                actionList.add( action );
+            }
+
+            OFPacketOut po = myFactory.buildPacketOut()
+            .setBufferId(OFBufferId.NO_BUFFER)
+            .setInPort(pi.getInPort())
+            .setData(arpReply.serialize())
+            .setActions(actionList)
+            .build();
+
+            sw.write(po);
+        }
     }
 
 

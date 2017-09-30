@@ -55,21 +55,21 @@ def runMinimalTopo():
         link=TCLink,
         autoSetMacs=True )
 
-    net.get('h1').cmd('arp -s 10.0.0.2 00:00:00:00:00:02')
-    net.get('h1').cmd('arp -s 10.0.0.3 00:00:00:00:00:03')
-    net.get('h1').cmd('arp -s 10.0.0.4 00:00:00:00:00:04')
+    # net.get('h1').cmd('arp -s 10.0.0.2 00:00:00:00:00:02')
+    # net.get('h1').cmd('arp -s 10.0.0.3 00:00:00:00:00:03')
+    # net.get('h1').cmd('arp -s 10.0.0.4 00:00:00:00:00:04')
 
-    net.get('h2').cmd('arp -s 10.0.0.1 00:00:00:00:00:01')
-    net.get('h2').cmd('arp -s 10.0.0.3 00:00:00:00:00:03')
-    net.get('h2').cmd('arp -s 10.0.0.4 00:00:00:00:00:04')
+    # net.get('h2').cmd('arp -s 10.0.0.1 00:00:00:00:00:01')
+    # net.get('h2').cmd('arp -s 10.0.0.3 00:00:00:00:00:03')
+    # net.get('h2').cmd('arp -s 10.0.0.4 00:00:00:00:00:04')
 
-    net.get('h3').cmd('arp -s 10.0.0.5 00:00:00:00:00:01')
-    net.get('h3').cmd('arp -s 10.0.0.2 00:00:00:00:00:02')
-    net.get('h3').cmd('arp -s 10.0.0.4 00:00:00:00:00:04')
+    # net.get('h3').cmd('arp -s 10.0.0.5 00:00:00:00:00:01')
+    # net.get('h3').cmd('arp -s 10.0.0.2 00:00:00:00:00:02')
+    # net.get('h3').cmd('arp -s 10.0.0.4 00:00:00:00:00:04')
 
-    net.get('h4').cmd('arp -s 10.0.0.5 00:00:00:00:00:01')
-    net.get('h4').cmd('arp -s 10.0.0.2 00:00:00:00:00:02')
-    net.get('h4').cmd('arp -s 10.0.0.3 00:00:00:00:00:03')
+    # net.get('h4').cmd('arp -s 10.0.0.5 00:00:00:00:00:01')
+    # net.get('h4').cmd('arp -s 10.0.0.2 00:00:00:00:00:02')
+    # net.get('h4').cmd('arp -s 10.0.0.3 00:00:00:00:00:03')
 
     # Actually start the network
     net.start()
