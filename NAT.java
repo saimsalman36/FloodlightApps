@@ -56,13 +56,18 @@ import java.util.*;
 import org.projectfloodlight.openflow.protocol.OFMessage;
 import org.projectfloodlight.openflow.protocol.OFType;
 import org.projectfloodlight.openflow.protocol.OFPacketIn;
+import org.projectfloodlight.openflow.protocol.OFPacketOut;
 
 import org.projectfloodlight.openflow.types.IPv4Address;
 import org.projectfloodlight.openflow.types.EthType;
 import org.projectfloodlight.openflow.types.DatapathId;
-// import org.projectfloodlight.openflow.types.OFPort;
+import org.projectfloodlight.openflow.protocol.OFFactory;
+import org.projectfloodlight.openflow.types.OFPort;
 import org.projectfloodlight.openflow.types.IpProtocol;
 import org.projectfloodlight.openflow.types.TransportPort;
+import org.projectfloodlight.openflow.protocol.action.OFAction;
+import org.projectfloodlight.openflow.protocol.action.OFActionOutput;
+import org.projectfloodlight.openflow.protocol.action.OFActions;
 
 public class NAT implements IFloodlightModule, IOFMessageListener {
 
@@ -124,9 +129,9 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
             /* We got an IPv4 packet; get the payload from Ethernet */
             IPv4 ipv4 = (IPv4) eth.getPayload();
             TransportPort[] ports = networkTranslator( ipv4, sw, pi, cntx );
-            // if(ports!=null){
-            	// installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
-            // }
+            if(ports!=null){
+            	installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
+            }
         }
     	// else if( eth.getEtherType()== Ethernet.TYPE_ARP ){
     	// 	handleARP( sw, pi, cntx );
@@ -292,121 +297,114 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
     	return natPort;
 	}
 	
-// 	private void installFlowMods(IOFSwitch sw, OFPacketIn msg, FloodlightContext cntx,
-// 			int internalAddress, short internalPort, short externalPort){
-// 		Ethernet eth = new Ethernet();
-// 		eth.deserialize(msg.getPacketData(), 0, msg.getPacketData().length);
-// 		//Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
-// 		if( eth.getEtherType()!=Ethernet.TYPE_IPv4){
-// 			return;
-// 		}
+	private void installFlowMods(IOFSwitch sw, OFPacketIn msg, FloodlightContext cntx,
+			IPv4Address internalAddress, TransportPort internalPort, TransportPort externalPort){
+		Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
+		if( eth.getEtherType()!=EthType.IPv4){
+			return;
+		}
 		
-// 		IPv4 ipv4 = (IPv4) eth.getPayload();
-// 		ipv4.setSourceAddress( external_ip );
-// 		TCP tcp = (TCP) ipv4.getPayload();
-// 		tcp.setSourcePort( externalPort );
-// 		ipv4.setPayload(tcp);
-		
-//         OFPacketOut po = (OFPacketOut) floodlightProvider.getOFMessageFactory()
-//                 .getMessage(OFType.PACKET_OUT);
-//         po.setInPort(msg.getInPort());
+		IPv4 ipv4 = (IPv4) eth.getPayload();
+		ipv4.setSourceAddress( external_ip );
+		TCP tcp = (TCP) ipv4.getPayload();
+		tcp.setSourcePort( externalPort );
+		ipv4.setPayload(tcp);
 
-//         // set actions
-//         ArrayList<OFAction> actions = new ArrayList<OFAction>();
-//         for( Short externalNATSwitchPort: this.nat_external_ports ){
-//         	OFActionOutput action = new OFActionOutput();
-//         	action.setPort( externalNATSwitchPort );
-//         	actions.add( action );
-//         }
-// 		po.setActions(actions);
-//         po.setActionsLength( (short) (nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH));
+		OFPacketOut.Builder po = sw.getOFFactory().buildPacketOut();
+        po.setInPort(msg.getInPort());
 
-//         // set data if is is included in the packetin
-//         byte[] packetData = eth.serialize();
-//         po.setLength(U16.t(OFPacketOut.MINIMUM_LENGTH
-//                 + po.getActionsLength() + packetData.length));
-//         po.setPacketData(packetData);
-//         try {
-//             sw.write(po, cntx);
-//             sw.flush();
-//         } catch (IOException e) {
-//             log.error("Failure writing PacketOut", e);
-//         }
+        // set actions
+        ArrayList<OFAction> actionList = new ArrayList<OFAction>();
+        OFActions actions = sw.getOFFactory().actions();
+
+        for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
+        	OFActionOutput action = actions.buildOutput()
+        		.setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+        		.build();
+        	actionList.add( action );
+        }
+		po.setActions(actionList);
+        // po.setActionsLength( (short) (nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH));
+
+        // set data if is is included in the packetin
+        byte[] packetData = eth.serialize();
+        po.setData(packetData);
+        sw.write(po.build());
 		
-//         //set forward translation
-//         OFMatch match = new OFMatch();
-//     	match.setWildcards( Wildcards.FULL.matchOn(Flag.DL_TYPE).matchOn(Flag.NW_SRC).matchOn(Flag.NW_PROTO).matchOn(Flag.TP_SRC).withNwSrcMask(32) );
-//     	match.setDataLayerType( Ethernet.TYPE_IPv4 );
-//     	match.setNetworkSource( internalAddress );
-//     	match.setNetworkProtocol( IPv4.PROTOCOL_TCP );
-//     	match.setTransportSource( internalPort );
+  //       //set forward translation
+  //       OFMatch match = new OFMatch();
+  //   	match.setWildcards( Wildcards.FULL.matchOn(Flag.DL_TYPE).matchOn(Flag.NW_SRC).matchOn(Flag.NW_PROTO).matchOn(Flag.TP_SRC).withNwSrcMask(32) );
+  //   	match.setDataLayerType( Ethernet.TYPE_IPv4 );
+  //   	match.setNetworkSource( internalAddress );
+  //   	match.setNetworkProtocol( IPv4.PROTOCOL_TCP );
+  //   	match.setTransportSource( internalPort );
     	
-//     	actions.clear();
-//         OFActionNetworkLayerSource ofanls = new OFActionNetworkLayerSource();
-//         ofanls.setNetworkAddress( IPv4.toIPv4Address(external_ip) );
-//         actions.add( ofanls );
-//         OFActionTransportLayerSource ofatls = new OFActionTransportLayerSource();
-//         ofatls.setTransportPort(externalPort);
-//         actions.add( ofatls );
-//         for( Short externalNATSwitchPort: this.nat_external_ports ){
-//         	OFActionOutput action = new OFActionOutput();
-//         	action.setPort( externalNATSwitchPort );
-//         	actions.add( action );
-//         }
+  //   	actions.clear();
+  //       OFActionNetworkLayerSource ofanls = new OFActionNetworkLayerSource();
+  //       ofanls.setNetworkAddress( IPv4.toIPv4Address(external_ip) );
+  //       actions.add( ofanls );
+  //       OFActionTransportLayerSource ofatls = new OFActionTransportLayerSource();
+  //       ofatls.setTransportPort(externalPort);
+  //       actions.add( ofatls );
+  //       for( Short externalNATSwitchPort: this.nat_external_ports ){
+  //       	OFActionOutput action = new OFActionOutput();
+  //       	action.setPort( externalNATSwitchPort );
+  //       	actions.add( action );
+  //       }
 
-// 		OFFlowMod flowMod = new OFFlowMod();
-//     	flowMod.setMatch( match );
-//     	flowMod.setBufferId(OFPacketOut.BUFFER_ID_NONE);
-//         flowMod.setLength( (short) (OFFlowMod.MINIMUM_LENGTH + 
-//         		nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH +
-//         		OFActionNetworkLayerSource.MINIMUM_LENGTH +
-//         		OFActionTransportLayerSource.MINIMUM_LENGTH) );
-//         flowMod.setActions( actions );
+		// OFFlowMod flowMod = new OFFlowMod();
+  //   	flowMod.setMatch( match );
+  //   	flowMod.setBufferId(OFPacketOut.BUFFER_ID_NONE);
+  //       flowMod.setLength( (short) (OFFlowMod.MINIMUM_LENGTH + 
+  //       		nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH +
+  //       		OFActionNetworkLayerSource.MINIMUM_LENGTH +
+  //       		OFActionTransportLayerSource.MINIMUM_LENGTH) );
+  //       flowMod.setActions( actions );
         
-//         try {
-//             sw.write(flowMod, cntx);
-//             sw.flush();
-//         } catch (IOException e) {
-//             log.error("Failure writing flowMod1", e);
-//         }
+  //       try {
+  //           sw.write(flowMod, cntx);
+  //           sw.flush();
+  //       } catch (IOException e) {
+  //           log.error("Failure writing flowMod1", e);
+  //       }
 
-//         //set reverse translation
-//         match = new OFMatch();
-//         match.setWildcards( Wildcards.FULL.matchOn(Flag.DL_TYPE).matchOn(Flag.NW_DST).matchOn(Flag.NW_PROTO).matchOn(Flag.TP_DST).withNwDstMask(32) );
-//     	match.setDataLayerType( Ethernet.TYPE_IPv4 );
-//         match.setNetworkDestination( IPv4.toIPv4Address(external_ip) );
-//         match.setNetworkProtocol( IPv4.PROTOCOL_TCP );
-//     	match.setTransportDestination( externalPort );
+  //       //set reverse translation
+  //       match = new OFMatch();
+  //       match.setWildcards( Wildcards.FULL.matchOn(Flag.DL_TYPE).matchOn(Flag.NW_DST).matchOn(Flag.NW_PROTO).matchOn(Flag.TP_DST).withNwDstMask(32) );
+  //   	match.setDataLayerType( Ethernet.TYPE_IPv4 );
+  //       match.setNetworkDestination( IPv4.toIPv4Address(external_ip) );
+  //       match.setNetworkProtocol( IPv4.PROTOCOL_TCP );
+  //   	match.setTransportDestination( externalPort );
     	
-//     	actions.clear();
-//         OFActionNetworkLayerDestination ofanld = new OFActionNetworkLayerDestination();
-//         ofanld.setNetworkAddress( internalAddress );
-//         actions.add( ofanld );
-//         OFActionTransportLayerDestination ofatld = new OFActionTransportLayerDestination();
-//         ofatld.setTransportPort( internalPort );
-//         actions.add( ofatld );
-//     	for( Short externalNATSwitchPort: this.nat_internal_ports ){
-//         	OFActionOutput action = new OFActionOutput();
-//         	action.setPort( externalNATSwitchPort );
-//         	actions.add( action );
-//         }
+  //   	actions.clear();
+  //       OFActionNetworkLayerDestination ofanld = new OFActionNetworkLayerDestination();
+  //       ofanld.setNetworkAddress( internalAddress );
+  //       actions.add( ofanld );
+  //       OFActionTransportLayerDestination ofatld = new OFActionTransportLayerDestination();
+  //       ofatld.setTransportPort( internalPort );
+  //       actions.add( ofatld );
+  //   	for( Short externalNATSwitchPort: this.nat_internal_ports ){
+  //       	OFActionOutput action = new OFActionOutput();
+  //       	action.setPort( externalNATSwitchPort );
+  //       	actions.add( action );
+  //       }
     	
-//     	flowMod = new OFFlowMod();
-//     	flowMod.setMatch( match );
-//     	flowMod.setBufferId(OFPacketOut.BUFFER_ID_NONE);
-//         flowMod.setLength( (short) (OFFlowMod.MINIMUM_LENGTH +
-//         		 this.nat_internal_ports.size()*OFActionOutput.MINIMUM_LENGTH + 
-//         		OFActionNetworkLayerDestination.MINIMUM_LENGTH +
-// 				OFActionTransportLayerDestination.MINIMUM_LENGTH) );
-//         flowMod.setActions( actions );
+  //   	flowMod = new OFFlowMod();
+  //   	flowMod.setMatch( match );
+  //   	flowMod.setBufferId(OFPacketOut.BUFFER_ID_NONE);
+  //       flowMod.setLength( (short) (OFFlowMod.MINIMUM_LENGTH +
+  //       		 this.nat_internal_ports.size()*OFActionOutput.MINIMUM_LENGTH + 
+  //       		OFActionNetworkLayerDestination.MINIMUM_LENGTH +
+		// 		OFActionTransportLayerDestination.MINIMUM_LENGTH) );
+  //       flowMod.setActions( actions );
 
-//         try {
-//             sw.write(flowMod, cntx);
-//             sw.flush();
-//         } catch (IOException e) {
-//             log.error("Failure writing flowMod2", e);
-//         }
-// 	}
+  //       try {
+  //           sw.write(flowMod, cntx);
+  //           sw.flush();
+  //       } catch (IOException e) {
+  //           log.error("Failure writing flowMod2", e);
+  //       }
+	}
 	
 	
 	
@@ -473,6 +471,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 			{
 				if( !temp.startsWith("//") ){
 					inside_ip.add(IPv4Address.of(temp));
+					System.out.println (IPv4Address.of(temp));
 				}
 			}
 			reader.close();
@@ -484,6 +483,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 			{
 				if( !temp.startsWith("//") ){
 					external_ip = IPv4Address.of(temp);
+					System.out.println (external_ip);
 					// assume one line and at the first line
 					break;
 				}
