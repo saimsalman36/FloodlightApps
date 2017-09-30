@@ -71,6 +71,8 @@ import org.projectfloodlight.openflow.protocol.action.OFActions;
 import org.projectfloodlight.openflow.protocol.match.MatchField;
 import org.projectfloodlight.openflow.protocol.match.Match;
 import org.projectfloodlight.openflow.protocol.OFFlowMod;
+import org.projectfloodlight.openflow.types.OFBufferId;
+import org.projectfloodlight.openflow.types.MacAddress;
 
 public class NAT implements IFloodlightModule, IOFMessageListener {
 
@@ -94,7 +96,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 //TCP ports already in use
     ArrayList<TransportPort> usedPorts = new ArrayList<TransportPort>();
 
-    HashMap<Long, Integer> internalMAC2ip = new HashMap<Long, Integer>(); 
+    HashMap<MacAddress, IPv4Address> internalMAC2ip = new HashMap<MacAddress, IPv4Address>(); 
 
     @Override
     public String getName() {
@@ -137,110 +139,111 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
                 installFlowMods(sw, pi, cntx, ipv4.getSourceAddress(), ports[0], ports[1]);
             }
         }
-// else if( eth.getEtherType()== Ethernet.TYPE_ARP ){
-// 	handleARP( sw, pi, cntx );
-// }
-// else{
-// 	//log.info( "Unsupported packet type: " + Integer.toHexString(eth.getEtherType() & 0xffff) );
-// }
+        // else if( eth.getEtherType()== EthType.ARP ){
+        // 	handleARP( sw, pi, cntx );
+        // }
+        // else{
+        // 	// log.info( "Unsupported packet type: " + Integer.toHexString(eth.getEtherType() & 0xffff) );
+        // }
         return Command.STOP;
     }
 
-// 	private void handleARP( IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
+	private void handleARP( IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
 
-// 		Ethernet eth = new Ethernet();
-// 		eth.deserialize(pi.getPacketData(), 0, pi.getPacketData().length);
-// 		//Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
-// 		ARP arp = (ARP) eth.getPayload();
-// 		System.err.println( arp.toString() );
-// 		if( inside_ip.contains(IPv4.fromIPv4Address(IPv4.toIPv4Address( arp.getSenderProtocolAddress()))) ){
+		Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);;
+		// eth.deserialize(pi.getPacketData(), 0, pi.getPacketData().length);
+		//Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
+		ARP arp = (ARP) eth.getPayload();
+        OFFactory myFactory = sw.getOFFactory();
+		System.err.println( arp.toString() );
 
-// 			internalMAC2ip.put( Ethernet.toLong(arp.getSenderHardwareAddress()), IPv4.toIPv4Address(arp.getSenderProtocolAddress()) );
-// 			arp.setSenderProtocolAddress( IPv4.toIPv4Address(external_ip) );
-// 			if( Ethernet.toLong(arp.getTargetHardwareAddress())==0 ){
-// 				arp.setTargetHardwareAddress( eth.getDestinationMACAddress() );//Ethernet.toMACAddress("ff:ff:ff:ff:ff:ff") );
-// 			}
-// 			// generate ARP request
-// 			IPacket arpRequest = new Ethernet()
-// 				.setSourceMACAddress(arp.getSenderHardwareAddress())
-// 				.setDestinationMACAddress(arp.getTargetHardwareAddress())
-// 				.setEtherType(Ethernet.TYPE_ARP)
-// 				.setPriorityCode(eth.getPriorityCode())
-// 				.setPayload( arp );
+		if (inside_ip.contains(arp.getSenderProtocolAddress())) {
 
-// 			//make packet out action
-// 	        OFPacketOut po = (OFPacketOut) floodlightProvider.getOFMessageFactory()
-// 	                .getMessage(OFType.PACKET_OUT);    
-// 	        po.setBufferId(OFPacketOut.BUFFER_ID_NONE).setInPort(pi.getInPort());
+			internalMAC2ip.put( arp.getSenderHardwareAddress(), arp.getSenderProtocolAddress() );
+			arp.setSenderProtocolAddress( external_ip );
+			if( arp.getTargetHardwareAddress().getLong()==0 ){
+				arp.setTargetHardwareAddress( eth.getDestinationMACAddress() );//Ethernet.toMACAddress("ff:ff:ff:ff:ff:ff") );
+			}
+			// generate ARP request
+			IPacket arpRequest = new Ethernet()
+				.setSourceMACAddress(arp.getSenderHardwareAddress())
+				.setDestinationMACAddress(arp.getTargetHardwareAddress())
+				.setEtherType(EthType.ARP)
+				.setPriorityCode(eth.getPriorityCode())
+				.setPayload( arp );
 
-// 	        ArrayList<OFAction> actions = new ArrayList<OFAction>();
-// 	        for( Short externalNATSwitchPort: this.nat_external_ports ){
-// 	        	OFActionOutput action = new OFActionOutput();
-// 	        	action.setPort( externalNATSwitchPort );
-// 	        	actions.add( action );
-// 	        }       
-// 	        po.setActions(actions);
-// 	        po.setActionsLength( (short) (nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH) );
-// 	        byte[] packetData = arpRequest.serialize();
-//             po.setPacketData(packetData);
-//             po.setLength(U16.t(OFPacketOut.MINIMUM_LENGTH
-//                     + po.getActionsLength() + packetData.length));
-//             System.out.println( po.toString() );
-// 	        try {
-// 	            sw.write(po, null);
-// 	            sw.flush();
-// 	        } catch (IOException e) {
-// 	            log.error("Failure writing PacketOut", e);
-// 	        }
+			//make packet out action
+            OFPacketOut.Builder po = myFactory.buildPacketOut().getMessage(OFType.PACKET_OUT);    
+	        po.setBufferId(OFPacketOut.BUFFER_ID_NONE).setInPort(pi.getInPort());
 
-// 		}
-// 		else if(IPv4.fromIPv4Address(IPv4.toIPv4Address(arp.getTargetProtocolAddress())).equals(external_ip)){
-// 			log.info( "Not originating from within NAT, target IP is NAT IP\n");
-// 			long dstMAC = Ethernet.toLong(eth.getDestinationMACAddress());
-// 			if( !internalMAC2ip.containsKey( dstMAC) ){
-// 				log.info( "Not forwarding. Outside host trying to initiate contact to inside host" );
-// 				return;
-// 			}
-// 			int dstTrueIP = internalMAC2ip.get( dstMAC );
-// 			arp.setTargetProtocolAddress( dstTrueIP );
+	        ArrayList<OFAction> actions = new ArrayList<OFAction>();
+	        for( Short externalNATSwitchPort: this.nat_external_ports ){
+	        	OFActionOutput action = new OFActionOutput();
+	        	action.setPort( externalNATSwitchPort );
+	        	actions.add( action );
+	        }       
+	        po.setActions(actions);
+	        po.setActionsLength( (short) (nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH) );
+	        byte[] packetData = arpRequest.serialize();
+            po.setPacketData(packetData);
+            po.setLength(U16.t(OFPacketOut.MINIMUM_LENGTH
+                    + po.getActionsLength() + packetData.length));
+            System.out.println( po.toString() );
+	        try {
+	            sw.write(po, null);
+	            sw.flush();
+	        } catch (IOException e) {
+	            log.error("Failure writing PacketOut", e);
+	        }
 
-// 			log.info( arp.toString() );
-// 			// generate ARP request
-// 			IPacket arpReply = new Ethernet()
-// 				.setSourceMACAddress(arp.getSenderHardwareAddress())
-// 				.setDestinationMACAddress(arp.getTargetHardwareAddress())
-// 				.setEtherType(Ethernet.TYPE_ARP)
-// 				.setPriorityCode(eth.getPriorityCode())
-// 				.setPayload( arp );
+		}
+		else if(IPv4.fromIPv4Address(IPv4.toIPv4Address(arp.getTargetProtocolAddress())).equals(external_ip)){
+			log.info( "Not originating from within NAT, target IP is NAT IP\n");
+			long dstMAC = Ethernet.toLong(eth.getDestinationMACAddress());
+			if( !internalMAC2ip.containsKey( dstMAC) ){
+				log.info( "Not forwarding. Outside host trying to initiate contact to inside host" );
+				return;
+			}
+			int dstTrueIP = internalMAC2ip.get( dstMAC );
+			arp.setTargetProtocolAddress( dstTrueIP );
 
-// 			//make packet out action
-// 			OFPacketOut po = (OFPacketOut) floodlightProvider.getOFMessageFactory()
-// 					.getMessage(OFType.PACKET_OUT);    
-// 			po.setBufferId(OFPacketOut.BUFFER_ID_NONE).setInPort(pi.getInPort());
+			log.info( arp.toString() );
+			// generate ARP request
+			IPacket arpReply = new Ethernet()
+				.setSourceMACAddress(arp.getSenderHardwareAddress())
+				.setDestinationMACAddress(arp.getTargetHardwareAddress())
+				.setEtherType(Ethernet.TYPE_ARP)
+				.setPriorityCode(eth.getPriorityCode())
+				.setPayload( arp );
 
-// 			ArrayList<OFAction> actions = new ArrayList<OFAction>();
-// 			for( Short internalNATSwitchPort: this.nat_internal_ports ){
-// 				OFActionOutput action = new OFActionOutput();
-// 				action.setPort( internalNATSwitchPort );
-// 				actions.add( action );
-// 			}       
-// 			po.setActions(actions);
-// 			po.setActionsLength( (short) (nat_internal_ports.size()*OFActionOutput.MINIMUM_LENGTH) );
-// 			byte[] packetData = arpReply.serialize();
-// 			po.setPacketData(pi.getPacketData());
-// 			po.setLength(U16.t(OFPacketOut.MINIMUM_LENGTH
-// 					+ po.getActionsLength() + packetData.length));
+			//make packet out action
+			OFPacketOut po = (OFPacketOut) floodlightProvider.getOFMessageFactory()
+					.getMessage(OFType.PACKET_OUT);    
+			po.setBufferId(OFPacketOut.BUFFER_ID_NONE).setInPort(pi.getInPort());
 
-// 			try {
-// 				sw.write(po, null);
-// 				sw.flush();
-// 			} catch (IOException e) {
-// 				log.error("Failure writing PacketOut", e);
-// 			}
-// 		}
+			ArrayList<OFAction> actions = new ArrayList<OFAction>();
+			for( Short internalNATSwitchPort: this.nat_internal_ports ){
+				OFActionOutput action = new OFActionOutput();
+				action.setPort( internalNATSwitchPort );
+				actions.add( action );
+			}       
+			po.setActions(actions);
+			po.setActionsLength( (short) (nat_internal_ports.size()*OFActionOutput.MINIMUM_LENGTH) );
+			byte[] packetData = arpReply.serialize();
+			po.setPacketData(pi.getPacketData());
+			po.setLength(U16.t(OFPacketOut.MINIMUM_LENGTH
+					+ po.getActionsLength() + packetData.length));
+
+			try {
+				sw.write(po, null);
+				sw.flush();
+			} catch (IOException e) {
+				log.error("Failure writing PacketOut", e);
+			}
+		}
 
 
-// 	}
+	}
 
 
     private TransportPort[] networkTranslator( IPv4 ipv4, IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx ){
@@ -274,250 +277,222 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         }
     }
 
-/**
-* Gets the external port for an internal <IP Address, Source Port>.
-* If a port has already been allocated, returns that port. Otherwise,
-* allocates a new, unused port for this address/port combo.
-* @param srcIp
-* @param srcPort
-* @return
-*/
-private TransportPort getExternalPort( IPv4Address srcIp, TransportPort srcPort ){
-    TransportPort natPort;
-    String key =srcIp.toString() + ":" + srcPort.toString();
-    if( internal2external.containsKey(key) ){
-        natPort = TransportPort.of( Integer.parseInt(internal2external.get( key ).split(":")[1]) );
-    }
-    else{
-        Random random = new Random();
-        natPort = TransportPort.of (random.nextInt(1000)+1024);
-        while( usedPorts.contains(natPort) ){
-            natPort = TransportPort.of (random.nextInt(1000)+1024);
+    /**
+    * Gets the external port for an internal <IP Address, Source Port>.
+    * If a port has already been allocated, returns that port. Otherwise,
+    * allocates a new, unused port for this address/port combo.
+    * @param srcIp
+    * @param srcPort
+    * @return
+    */
+    private TransportPort getExternalPort( IPv4Address srcIp, TransportPort srcPort ){
+        TransportPort natPort;
+        String key =srcIp.toString() + ":" + srcPort.toString();
+        if( internal2external.containsKey(key) ){
+            natPort = TransportPort.of( Integer.parseInt(internal2external.get( key ).split(":")[1]) );
         }
-        usedPorts.add( natPort );
-        String value = this.external_ip + ":" + natPort;
-        this.internal2external.put( key, value );
+        else{
+            Random random = new Random();
+            natPort = TransportPort.of (random.nextInt(1000)+1024);
+            while( usedPorts.contains(natPort) ){
+                natPort = TransportPort.of (random.nextInt(1000)+1024);
+            }
+            usedPorts.add( natPort );
+            String value = this.external_ip + ":" + natPort;
+            this.internal2external.put( key, value );
+        }
+        return natPort;
     }
-    return natPort;
-}
 
-private void installFlowMods(IOFSwitch sw, OFPacketIn msg, FloodlightContext cntx,
-    IPv4Address internalAddress, TransportPort internalPort, TransportPort externalPort){
-    Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
-    if( eth.getEtherType()!=EthType.IPv4){
-        return;
-    }
+    private void installFlowMods(IOFSwitch sw, OFPacketIn msg, FloodlightContext cntx,
+        IPv4Address internalAddress, TransportPort internalPort, TransportPort externalPort){
+        Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
+        if( eth.getEtherType()!=EthType.IPv4){
+            return;
+        }
 
-    OFFactory myFactory = sw.getOFFactory();
+        OFFactory myFactory = sw.getOFFactory();
 
-    IPv4 ipv4 = (IPv4) eth.getPayload();
-    ipv4.setSourceAddress( external_ip );
-    TCP tcp = (TCP) ipv4.getPayload();
-    tcp.setSourcePort( externalPort );
-    ipv4.setPayload(tcp);
+    // set actions
+        ArrayList<OFAction> actionList = new ArrayList<OFAction>();
+        OFActions actions = myFactory.actions();
 
-    OFPacketOut.Builder po = myFactory.buildPacketOut();
-// po.setInPort(msg.getInPort()); # SAIM: Defined as part of match!
-
-// set actions
-    ArrayList<OFAction> actionList = new ArrayList<OFAction>();
-    OFActions actions = myFactory.actions();
-
-    for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
-        OFActionOutput action = actions.buildOutput()
-        .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+    //set forward translation
+        Match match = myFactory.buildMatch()
+        .setExact(MatchField.ETH_TYPE, EthType.IPv4)
+        .setExact(MatchField.IPV4_SRC, internalAddress)
+        .setExact(MatchField.IP_PROTO, IpProtocol.TCP)
+        .setExact(MatchField.TCP_SRC, internalPort)
         .build();
-        actionList.add( action );
-    }
-    po.setActions(actionList);
-// po.setActionsLength( (short) (nat_external_ports.size()*OFActionOutput.MINIMUM_LENGTH));
 
-// set data if is is included in the packetin
-    byte[] packetData = eth.serialize();
-    po.setData(packetData);
-    sw.write(po.build());
+        actionList.clear();
+        actionList.add(sw.getOFFactory().actions().setNwSrc(external_ip));
+        actionList.add(sw.getOFFactory().actions().setTpSrc(externalPort));
 
-//set forward translation
-    Match match = myFactory.buildMatch()
-    .setExact(MatchField.ETH_TYPE, EthType.IPv4)
-    .setExact(MatchField.IPV4_SRC, internalAddress)
-    .setExact(MatchField.IP_PROTO, IpProtocol.TCP)
-    .setExact(MatchField.TCP_SRC, internalPort)
-    .build();
+        for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
+            OFActionOutput action = actions.buildOutput()
+            .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+            .build();
+            actionList.add( action );
+        }
 
-    actionList.clear();
-    actionList.add(sw.getOFFactory().actions().setNwSrc(external_ip));
-    actionList.add(sw.getOFFactory().actions().setTpSrc(externalPort));
-
-    for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
-        OFActionOutput action = actions.buildOutput()
-        .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+        OFFlowMod flowMod = myFactory.buildFlowModify()
+        .setBufferId(OFBufferId.NO_BUFFER)
+        .setMatch(match)
+        .setActions(actionList)
         .build();
-        actionList.add( action );
-    }
 
-    OFFlowMod flowMod = myFactory.buildFlowModify()
-    .setBufferId(OFBufferId.NO_BUFFER)
-    .setMatch(match)
-    .setActions(actionList)
-    .build();
-
-    sw.write(flowMod);
+        sw.write(flowMod);
 
     //set reverse translation //
 
-    match = myFactory.buildMatch()
-    .setExact(MatchField.ETH_TYPE, EthType.IPv4)
-    .setExact(MatchField.IPV4_DST, external_ip)
-    .setExact(MatchField.IP_PROTO, IpProtocol.TCP)
-    .setExact(MatchField.TCP_DST, externalPort)
-    .build();
+        OFFactory myFactoryReverse = sw.getOFFactory();
+        ArrayList<OFAction> actionListReverse = new ArrayList<OFAction>();
+        OFActions actionsReverse = myFactoryReverse.actions();
 
-    actionList.clear();
-    actionList.add(sw.getOFFactory().actions().setNwDst(internalAddress));
-    actionList.add(sw.getOFFactory().actions().setTpDst(internalPort));
-
-  	for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
-      	OFActionOutput action = actions.buildOutput()
-      	.setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+        Match matchReverse = myFactoryReverse.buildMatch()
+        .setExact(MatchField.ETH_TYPE, EthType.IPv4)
+        .setExact(MatchField.IPV4_DST, external_ip)
+        .setExact(MatchField.IP_PROTO, IpProtocol.TCP)
+        .setExact(MatchField.TCP_DST, externalPort)
         .build();
-      	actionList.add( action );
-    }
 
-     OFFlowMod flowMod = myFactory.buildFlowModify()
-    .setBufferId(OFBufferId.NO_BUFFER)
-    .setMatch(match)
-    .setActions(actionList)
-    .build();
+        actionListReverse.clear();
+        actionListReverse.add(sw.getOFFactory().actions().setNwDst(internalAddress));
+        actionListReverse.add(sw.getOFFactory().actions().setTpDst(internalPort));
 
-    sw.write(flowMod);
-}
-
-
-
-@Override
-public Collection<Class<? extends IFloodlightService>> getModuleServices() {
-// TODO Auto-generated method stub
-    return null;
-}
-
-@Override
-public Map<Class<? extends IFloodlightService>, IFloodlightService> getServiceImpls() {
-// TODO Auto-generated method stub
-    return null;
-}
-
-@Override
-public Collection<Class<? extends IFloodlightService>> getModuleDependencies() {
-// TODO Auto-generated method stub
-    return null;
-}
-
-@Override
-public void init(FloodlightModuleContext context)
-throws FloodlightModuleException {
-    final Map<String, String> modConf = context.getConfigParams(this);
-
-// File containing inside IPs
-    this.insideIPsFile = modConf.get("inside_ips_file");
-    if (this.insideIPsFile == null) {
-        throw new RuntimeException("No value for configuration parameter 'inside_ips_file'!");
-    }
-
-// File containing external IP
-    this.externalIPFile = modConf.get("external_ip_file");
-    if (this.externalIPFile == null) {
-        throw new RuntimeException("No value for configuration parameter 'external_ip_file'!");
-    }
-
-// File containing NAT info
-    this.natInfoFile = modConf.get("nat_info_file");
-    if (this.natInfoFile == null) {
-        throw new RuntimeException("No value for configuration parameter 'nat_info_file'!");
-    }
-
-}
-
-@Override
-public void startUp(FloodlightModuleContext context)
-throws FloodlightModuleException {
-// TODO Auto-generated method stub
-    System.out.println( "Starting up NAT module" );
-    floodlightProvider = context
-    .getServiceImpl(IFloodlightProviderService.class);
-
-    floodlightProvider.addOFMessageListener(OFType.PACKET_IN, this);
-
-    BufferedReader reader;
-    try
-    {
-//read in internal ip addresses
-        reader = new BufferedReader(new FileReader(new File(this.insideIPsFile)));
-        String temp = null;
-        while ((temp = reader.readLine()) != null)
-        {
-            if( !temp.startsWith("//") ){
-                inside_ip.add(IPv4Address.of(temp));
-                System.out.println (IPv4Address.of(temp));
-            }
+        for( TransportPort externalNATSwitchPort: this.nat_internal_ports ){
+            OFActionOutput action = actions.buildOutput()
+            .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+            .build();
+            actionListReverse.add( action );
         }
-        reader.close();
 
-//read in externally visible ip addresses
-        reader = new BufferedReader(new FileReader(new File(this.externalIPFile)));
-        temp = null;
-        while ((temp = reader.readLine()) != null)
-        {
-            if( !temp.startsWith("//") ){
-                external_ip = IPv4Address.of(temp);
-                System.out.println (external_ip);
-// assume one line and at the first line
-                break;
-            }
+        OFFlowMod flowModReverse = myFactoryReverse.buildFlowModify()
+        .setBufferId(OFBufferId.NO_BUFFER)
+        .setMatch(matchReverse)
+        .setActions(actionListReverse)
+        .build();
+
+        sw.write(flowModReverse);
+    }
+
+
+
+    @Override
+    public Collection<Class<? extends IFloodlightService>> getModuleServices() {
+    // TODO Auto-generated method stub
+        return null;
+    }
+
+    @Override
+    public Map<Class<? extends IFloodlightService>, IFloodlightService> getServiceImpls() {
+    // TODO Auto-generated method stub
+        return null;
+    }
+
+    @Override
+    public Collection<Class<? extends IFloodlightService>> getModuleDependencies() {
+    // TODO Auto-generated method stub
+        return null;
+    }
+
+    @Override
+    public void init(FloodlightModuleContext context)
+    throws FloodlightModuleException {
+        final Map<String, String> modConf = context.getConfigParams(this);
+
+    // File containing inside IPs
+        this.insideIPsFile = modConf.get("inside_ips_file");
+        if (this.insideIPsFile == null) {
+            throw new RuntimeException("No value for configuration parameter 'inside_ips_file'!");
         }
-        reader.close();
 
-//read in NAT switch id, inside ports, outside ports
-        reader = new BufferedReader(new FileReader(new File(this.natInfoFile)));
-        temp = null;
-        System.out.println( "NAT info:" );
-        while ((temp = reader.readLine()) != null)
+    // File containing external IP
+        this.externalIPFile = modConf.get("external_ip_file");
+        if (this.externalIPFile == null) {
+            throw new RuntimeException("No value for configuration parameter 'external_ip_file'!");
+        }
+
+    // File containing NAT info
+        this.natInfoFile = modConf.get("nat_info_file");
+        if (this.natInfoFile == null) {
+            throw new RuntimeException("No value for configuration parameter 'nat_info_file'!");
+        }
+
+    }
+
+    @Override
+    public void startUp(FloodlightModuleContext context)
+    throws FloodlightModuleException {
+    // TODO Auto-generated method stub
+        System.out.println( "Starting up NAT module" );
+        floodlightProvider = context
+        .getServiceImpl(IFloodlightProviderService.class);
+
+        floodlightProvider.addOFMessageListener(OFType.PACKET_IN, this);
+
+        BufferedReader reader;
+        try
         {
-            if( !temp.startsWith("//") ){
-                String[] nat_info = temp.split( "," );
-
-                nat_swId = DatapathId.of(Long.valueOf( nat_info[0] ));
-                System.out.println( "\tSwitchID: " + nat_swId );
-
-                for( String internal_port: nat_info[1].trim().split(" ") ){
-                    nat_internal_ports.add( TransportPort.of( Integer.parseInt(internal_port)) );
+    //read in internal ip addresses
+            reader = new BufferedReader(new FileReader(new File(this.insideIPsFile)));
+            String temp = null;
+            while ((temp = reader.readLine()) != null)
+            {
+                if( !temp.startsWith("//") ){
+                    inside_ip.add(IPv4Address.of(temp));
+                    System.out.println (IPv4Address.of(temp));
                 }
-                System.out.println( "\tInternal ports: " + nat_internal_ports.toString() );
-
-                for( String external_port: nat_info[2].trim().split(" ") ){
-                    nat_external_ports.add( TransportPort.of( Integer.parseInt(external_port)) );
-                }
-                System.out.println( "\tExternal ports:" + nat_external_ports.toString() );
-// assume one line and at the first line
-                break;
             }
+            reader.close();
+
+    //read in externally visible ip addresses
+            reader = new BufferedReader(new FileReader(new File(this.externalIPFile)));
+            temp = null;
+            while ((temp = reader.readLine()) != null)
+            {
+                if( !temp.startsWith("//") ){
+                    external_ip = IPv4Address.of(temp);
+                    System.out.println (external_ip);
+    // assume one line and at the first line
+                    break;
+                }
+            }
+            reader.close();
+
+    //read in NAT switch id, inside ports, outside ports
+            reader = new BufferedReader(new FileReader(new File(this.natInfoFile)));
+            temp = null;
+            System.out.println( "NAT info:" );
+            while ((temp = reader.readLine()) != null)
+            {
+                if( !temp.startsWith("//") ){
+                    String[] nat_info = temp.split( "," );
+
+                    nat_swId = DatapathId.of(Long.valueOf( nat_info[0] ));
+                    System.out.println( "\tSwitchID: " + nat_swId );
+
+                    for( String internal_port: nat_info[1].trim().split(" ") ){
+                        nat_internal_ports.add( TransportPort.of( Integer.parseInt(internal_port)) );
+                    }
+                    System.out.println( "\tInternal ports: " + nat_internal_ports.toString() );
+
+                    for( String external_port: nat_info[2].trim().split(" ") ){
+                        nat_external_ports.add( TransportPort.of( Integer.parseInt(external_port)) );
+                    }
+                    System.out.println( "\tExternal ports:" + nat_external_ports.toString() );
+    // assume one line and at the first line
+                    break;
+                }
+            }
+            reader.close();
+
+        } catch (IOException e)
+        {
+            e.printStackTrace();
         }
-        reader.close();
 
-    } catch (IOException e)
-    {
-        e.printStackTrace();
+
     }
-
-
-}
-
-// 	/**
-// 	 * @param args
-// 	 */
-// 	public static void main(String[] args) {
-// 		// TODO Auto-generated method stub
-
-// 	}
-
 }
