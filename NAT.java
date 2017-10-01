@@ -214,6 +214,33 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 
         OFFactory myFactory = sw.getOFFactory();
 
+        IPv4 ipv4 = (IPv4) eth.getPayload();
+        ipv4.setSourceAddress( external_ip );
+        TCP tcp = (TCP) ipv4.getPayload();
+        tcp.setSourcePort( externalPort );
+        ipv4.setPayload(tcp);
+ 
+        // set actions
+        ArrayList<OFAction> actionListInit = new ArrayList<OFAction>();
+        OFActions actionsInit = myFactory.actions();
+
+        for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
+            OFActionOutput action = actionsInit.buildOutput()
+            .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+            .build();
+            actionListInit.add( action );
+        }
+
+        OFPacketOut po = myFactory.buildPacketOut()
+        .setInPort(msg.getInPort())
+        .setData(eth.serialize())
+        .setActions(actionListInit)
+        .build();
+
+        sw.write(po);
+
+/////////////////////////////////////////////////////////////////////
+
     // set actions
         ArrayList<OFAction> actionList = new ArrayList<OFAction>();
         OFActions actions = myFactory.actions();
@@ -328,16 +355,14 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 
         }
         else if((arp.getTargetProtocolAddress()).equals(external_ip)) {
-            MacAddress srcMAC =  eth.getSourceMACAddress();
-
             MacAddress dstMAC = eth.getDestinationMACAddress();
-            IPv4Address dstTrueIP = internalMAC2ip.get( dstMAC );
 
             if( !internalMAC2ip.containsKey( dstMAC) ){
                log.info( "Not forwarding. Outside host trying to initiate contact to inside host" );
                return;
            }
 
+            IPv4Address dstTrueIP = internalMAC2ip.get( dstMAC );
             arp.setTargetProtocolAddress( dstTrueIP );
 
             // generate ARP request
