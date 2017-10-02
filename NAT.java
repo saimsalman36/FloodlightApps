@@ -214,33 +214,6 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 
         OFFactory myFactory = sw.getOFFactory();
 
-        IPv4 ipv4 = (IPv4) eth.getPayload();
-        ipv4.setSourceAddress( external_ip );
-        TCP tcp = (TCP) ipv4.getPayload();
-        tcp.setSourcePort( externalPort );
-        ipv4.setPayload(tcp);
- 
-        // set actions
-        ArrayList<OFAction> actionListInit = new ArrayList<OFAction>();
-        OFActions actionsInit = myFactory.actions();
-
-        for( TransportPort externalNATSwitchPort: this.nat_external_ports ){
-            OFActionOutput action = actionsInit.buildOutput()
-            .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
-            .build();
-            actionListInit.add( action );
-        }
-
-        OFPacketOut po = myFactory.buildPacketOut()
-        .setInPort(msg.getInPort())
-        .setData(eth.serialize())
-        .setActions(actionListInit)
-        .build();
-
-        sw.write(po);
-
-/////////////////////////////////////////////////////////////////////
-
     // set actions
         ArrayList<OFAction> actionList = new ArrayList<OFAction>();
         OFActions actions = myFactory.actions();
@@ -289,9 +262,9 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         actionListReverse.add(sw.getOFFactory().actions().setNwDst(internalAddress));
         actionListReverse.add(sw.getOFFactory().actions().setTpDst(internalPort));
 
-        for( TransportPort externalNATSwitchPort: this.nat_internal_ports ){
+        for( TransportPort internalNATSwitchPort: this.nat_internal_ports ){
             OFActionOutput action = actionsReverse.buildOutput()
-            .setPort( OFPort.of(externalNATSwitchPort.getPort()) )
+            .setPort( OFPort.of(internalNATSwitchPort.getPort()) )
             .build();
             actionListReverse.add( action );
         }
@@ -357,10 +330,10 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         else if((arp.getTargetProtocolAddress()).equals(external_ip)) {
             MacAddress dstMAC = eth.getDestinationMACAddress();
 
-            if( !internalMAC2ip.containsKey( dstMAC) ){
-               log.info( "Not forwarding. Outside host trying to initiate contact to inside host" );
-               return;
-           }
+            if( arp.getTargetHardwareAddress().getLong()==0 ){
+                System.err.println(eth.getDestinationMACAddress());
+                arp.setTargetHardwareAddress( eth.getDestinationMACAddress() );//Ethernet.toMACAddress("ff:ff:ff:ff:ff:ff") );
+            }
 
             IPv4Address dstTrueIP = internalMAC2ip.get( dstMAC );
             arp.setTargetProtocolAddress( dstTrueIP );

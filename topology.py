@@ -53,7 +53,7 @@ def runMinimalTopo():
         controller=lambda name: RemoteController( name, ip='127.0.0.1', port=6653),
         switch=OVSSwitch,
         link=TCLink,
-        autoSetMacs=True )
+        autoSetMacs=True)
 
     # net.get('h1').cmd('arp -s 10.0.0.2 00:00:00:00:00:02')
     # net.get('h1').cmd('arp -s 10.0.0.3 00:00:00:00:00:03')
