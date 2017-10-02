@@ -127,8 +127,6 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         OFPacketIn pi = (OFPacketIn) msg;
         Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
 
-        if( eth.getEtherType()==EthType.IPv4 || eth.getEtherType()==EthType.ARP)
-            // System.err.println( "Switch " +sw.getId() + ":" + eth.toString() );
         if( eth.getEtherType() == EthType.IPv4 ){
             /* We got an IPv4 packet; get the payload from Ethernet */
             IPv4 ipv4 = (IPv4) eth.getPayload();
@@ -284,7 +282,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
         ARP arp = (ARP) eth.getPayload();
         OFFactory myFactory = sw.getOFFactory();
 
-        System.err.println("ARP PACKET: " + arp);
+        // System.err.println("ARP PACKET: " + arp);
 
         if (!((arp.getTargetProtocolAddress()).equals(external_ip))) {
             if (this.nat_external_ports.contains(TransportPort.of(pi.getInPort().getPortNumber()))) {
@@ -294,7 +292,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
 
             internalMAC2ip.put( arp.getSenderHardwareAddress(), arp.getSenderProtocolAddress() );
             arp.setSenderProtocolAddress( external_ip );
-            System.err.println(arp.getTargetHardwareAddress());
+            // System.err.println(arp.getTargetHardwareAddress());
             if( arp.getTargetHardwareAddress().getLong()==0 ){
                 System.err.println(eth.getDestinationMACAddress());
                 arp.setTargetHardwareAddress( eth.getDestinationMACAddress() );//Ethernet.toMACAddress("ff:ff:ff:ff:ff:ff") );
@@ -331,7 +329,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
             MacAddress dstMAC = eth.getDestinationMACAddress();
 
             if( arp.getTargetHardwareAddress().getLong()==0 ){
-                System.err.println(eth.getDestinationMACAddress());
+                // System.err.println(eth.getDestinationMACAddress());
                 arp.setTargetHardwareAddress( eth.getDestinationMACAddress() );//Ethernet.toMACAddress("ff:ff:ff:ff:ff:ff") );
             }
 
@@ -416,7 +414,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
     public void startUp(FloodlightModuleContext context)
     throws FloodlightModuleException {
     // TODO Auto-generated method stub
-        System.out.println( "Starting up NAT module" );
+        // System.out.println( "Starting up NAT module" );
         floodlightProvider = context
         .getServiceImpl(IFloodlightProviderService.class);
 
@@ -432,7 +430,7 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
             {
                 if( !temp.startsWith("//") ){
                     inside_ip.add(IPv4Address.of(temp));
-                    System.out.println (IPv4Address.of(temp));
+                    // System.out.println (IPv4Address.of(temp));
                 }
             }
             reader.close();
@@ -444,8 +442,6 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
             {
                 if( !temp.startsWith("//") ){
                     external_ip = IPv4Address.of(temp);
-                    System.out.println (external_ip);
-    // assume one line and at the first line
                     break;
                 }
             }
@@ -454,25 +450,20 @@ public class NAT implements IFloodlightModule, IOFMessageListener {
     //read in NAT switch id, inside ports, outside ports
             reader = new BufferedReader(new FileReader(new File(this.natInfoFile)));
             temp = null;
-            System.out.println( "NAT info:" );
             while ((temp = reader.readLine()) != null)
             {
                 if( !temp.startsWith("//") ){
                     String[] nat_info = temp.split( "," );
 
                     nat_swId = DatapathId.of(Long.valueOf( nat_info[0] ));
-                    System.out.println( "\tSwitchID: " + nat_swId );
 
                     for( String internal_port: nat_info[1].trim().split(" ") ){
                         nat_internal_ports.add( TransportPort.of( Integer.parseInt(internal_port)) );
                     }
-                    System.out.println( "\tInternal ports: " + nat_internal_ports.toString() );
 
                     for( String external_port: nat_info[2].trim().split(" ") ){
                         nat_external_ports.add( TransportPort.of( Integer.parseInt(external_port)) );
                     }
-                    System.out.println( "\tExternal ports:" + nat_external_ports.toString() );
-    // assume one line and at the first line
                     break;
                 }
             }
