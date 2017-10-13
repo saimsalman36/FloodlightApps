@@ -1,5 +1,5 @@
 
-package net.floodlightcontroller.rf;
+package net.floodlightcontroller.routeflow;
 
 // import edu.duke.cs.legosdn.core.Defaults;
 // import edu.duke.cs.legosdn.core.log.FileRecorder;
@@ -69,10 +69,10 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
     public static final int UNKNOWN_NEXT_HOP = 0;
 
     private static final File NUM_RT_WR = new File(String.format("%s/%s-num-rt-writes.txt",
-                                                                 Defaults.APP_LOGS_PATH,
+                                                                 "/home/saimsalman/OldFloodlight/floodlight_MASTER/src/main/java/net/floodlightcontroller/routeflow",
                                                                  RouteFlow.class.getCanonicalName()));
     private final File ROUTES_LOG = new File(String.format("%s/%s-routes.txt",
-                                                           Defaults.APP_LOGS_PATH,
+                                                           "/home/saimsalman/OldFloodlight/floodlight_MASTER/src/main/java/net/floodlightcontroller/routeflow",
                                                            RouteFlow.class.getCanonicalName()));
     private Recorder recorder;
 
@@ -127,6 +127,8 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
         final Collection<Class<? extends IFloodlightService>> deps =
                 new ArrayList<Class<? extends IFloodlightService>>(1);
         deps.add(IFloodlightProviderService.class);
+        deps.add(ILinkDiscoveryService.class);
+        deps.add(IOFSwitchService.class);
         return deps;
     }
 
@@ -205,7 +207,7 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
                                        switchId.toString(), numSws, numActiveSws));
         }
 
-        this.recorder.logInMsg(String.format("Sw-%d removed.", switchId), ROUTES_LOG);
+        this.recorder.logInMsg(String.format("Sw-%s removed.", switchId.toString()), ROUTES_LOG);
 
         synchronized (this.activeSws) {
             if (this.processLinkUpdates(this.linkDiscoverySrvc.getLinks())) {
@@ -234,7 +236,7 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
                                        switchId.toString(), numSws, numActiveSws));
         }
 
-        this.recorder.logInMsg(String.format("Sw-%d activated.", switchId), ROUTES_LOG);
+        this.recorder.logInMsg(String.format("Sw-%s activated.", switchId.toString()), ROUTES_LOG);
 
         synchronized (this.activeSws) {
             if (this.processLinkUpdates(this.linkDiscoverySrvc.getLinks())) {
@@ -250,8 +252,8 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
                                        switchId.toString(), port.toString(), type.toString()));
         }
 
-        this.recorder.logInMsg(String.format("Sw-%d:%d %s.",
-                                             switchId, port, type.toString()),
+        this.recorder.logInMsg(String.format("Sw-%s:%s %s.",
+                                             switchId.toString(), port.toString(), type.toString()),
                                ROUTES_LOG);
 
         synchronized (this.activeSws) {
@@ -292,12 +294,12 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
             }
             delLinks.add(link);
 
-            this.recorder.logInMsg(String.format("Ignoring link %s Sw-%d:%d Sw-%d:%d",
+            this.recorder.logInMsg(String.format("Ignoring link %s Sw-%s:%s Sw-%s:%s",
                                                  links.get(link).getLinkType().toString(),
-                                                 link.getSrc(),
-                                                 link.getSrcPort(),
-                                                 link.getDst(),
-                                                 link.getDstPort()),
+                                                 link.getSrc().toString(),
+                                                 link.getSrcPort().toString(),
+                                                 link.getDst().toString(),
+                                                 link.getDstPort()).toString(),
                                    ROUTES_LOG);
 
         }
@@ -440,7 +442,7 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
             linkDetails.put(le, srcPort);
 
             if (logger.isDebugEnabled()) {
-                logger.debug(String.format("computeRoutes> link: %d:%d => %d", le.src, srcPort, le.dst));
+                logger.debug(String.format("computeRoutes> link: %s:%s => %s", le.src.toString(), srcPort.toString(), le.dst.toString()));
             }
         }
         final Map<DatapathId, Map<DatapathId, DatapathId>> routes = this.calcShortestPaths(linkDetails.keySet());
@@ -711,8 +713,8 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
 
         sw.write(flowAdd);
 
-        this.recorder.logOutMsg(String.format("Sw-%d:%d => %s ",
-                                              sw, outPort, host),
+        this.recorder.logOutMsg(String.format("Sw-%s:%s => %s ",
+                                              sw.toString(), outPort.toString(), host),
                                 ROUTES_LOG);
     }
 
