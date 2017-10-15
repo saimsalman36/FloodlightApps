@@ -30,32 +30,40 @@ import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IFloodlightProviderService;
 import net.floodlightcontroller.core.IOFMessageListener;
 import net.floodlightcontroller.core.IOFSwitch;
-import net.floodlightcontroller.core.IOFSwitch.PortChangeType;
+import net.floodlightcontroller.core.PortChangeType;
 import net.floodlightcontroller.core.IOFSwitchListener;
-import net.floodlightcontroller.core.ImmutablePort;
+// import net.floodlightcontroller.core.ImmutablePort;
 import net.floodlightcontroller.core.module.FloodlightModuleContext;
 import net.floodlightcontroller.core.module.FloodlightModuleException;
 import net.floodlightcontroller.core.module.IFloodlightModule;
 import net.floodlightcontroller.core.module.IFloodlightService;
 import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryListener;
-import net.floodlightcontroller.packet.Ethernet;
 
-import org.openflow.protocol.OFFlowMod;
-import org.openflow.protocol.OFMatch;
-import org.openflow.protocol.OFMessage;
-import org.openflow.protocol.OFPacketIn;
-import org.openflow.protocol.OFPacketOut;
-import org.openflow.protocol.OFStatisticsReply;
-import org.openflow.protocol.OFType;
-import org.openflow.protocol.Wildcards;
-import org.openflow.protocol.Wildcards.Flag;
-import org.openflow.protocol.action.OFAction;
-import org.openflow.protocol.action.OFActionOutput;
-import org.openflow.protocol.statistics.OFFlowStatisticsReply;
-import org.openflow.protocol.statistics.OFStatistics;
+
+import net.floodlightcontroller.packet.Ethernet;
+import org.projectfloodlight.openflow.protocol.OFFlowAdd;
+import org.projectfloodlight.openflow.protocol.OFFlowMod;
+import org.projectfloodlight.openflow.protocol.match.MatchField;
+import org.projectfloodlight.openflow.protocol.match.Match;
+import org.projectfloodlight.openflow.protocol.OFMessage;
+import org.projectfloodlight.openflow.protocol.OFPacketIn;
+import org.projectfloodlight.openflow.protocol.OFPacketOut;
+import org.projectfloodlight.openflow.protocol.OFStatisticsReply;
+import org.projectfloodlight.openflow.protocol.OFType;
+import org.projectfloodlight.openflow.protocol.Wildcards;
+import org.projectfloodlight.openflow.protocol.Wildcards.Flag;
+import org.projectfloodlight.openflow.protocol.action.OFAction;
+import org.projectfloodlight.openflow.protocol.action.OFActionOutput;
+import org.projectfloodlight.openflow.protocol.statistics.OFFlowStatisticsReply;
+import org.projectfloodlight.openflow.protocol.statistics.OFStatistics;
+import org.projectfloodlight.openflow.types.MacAddress;
+import org.projectfloodlight.openflow.types.OFPort;
+
 import org.openflow.util.HexString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.projectfloodlight.openflow.types.DatapathId;
 
 /**
  * Implementation of Hedera.
@@ -225,13 +233,13 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   // Network topology
   private final NetTopo netTopo;
   // Set of MACs we have learned about.
-  private final ConcurrentSkipListSet<String> knownMacs;
+  private final ConcurrentSkipListSet<MacAddress> knownMacs;
   // Switch ID to packet match mappings.
-  private final ConcurrentMap<Long, LinkedList<OFMatch>> swMatchMap;
+  private final ConcurrentMap<DatapathId, LinkedList<OFMatch>> swMatchMap;
   // Host MAC address to Switch ID mappings.
-  private final ConcurrentMap<String, Long> hostMacToSwMap;
+  private final ConcurrentMap<MacAddress, DatapathId> hostMacToSwMap;
   // Edge switches (i.e., switches connected to hosts).
-  private final ConcurrentSkipListSet<Long> edgeSws;
+  private final ConcurrentSkipListSet<DatapathId> edgeSws;
   // Flow-demand estimator.
   private final DemandEstimator demandEst;
   // Statistics (number of bytes delivered) for each flow match.
@@ -240,7 +248,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   // Per-flow byte counts.
   private final ConcurrentMap<String, ConcurrentMap<String, FlowStatsWrapper>> perFlowStats;
   // Switches associated with the STATS_REPLY.
-  private final ConcurrentSkipListSet<Long> statSrcs;
+  private final ConcurrentSkipListSet<DatapathId> statSrcs;
   // Threshold rate for detecting elephant flows.
   private static double elephantRate;
   // Last time when we load-balanced elephant flows in the network.
@@ -397,13 +405,13 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 		{
 			try
 			{
-				if (pi.getInPort() == 1)
+				if (pi.getInPort().getPortNumber() == 1)
 				{
 					LOG.info("Set state " + State.has_port_1.ordinal());
 					this.slq.set(this.nsID, State.has_port_1.ordinal(),
 							typeSer.valueOf(true));
 				}
-				else if (pi.getInPort() == 2)
+				else if (pi.getInPort().getPortNumber() == 2)
 				{
 					LOG.info("Get state " + State.counter_port_2.ordinal());
 					int pkt_counter = typeDeser.toInteger(this.slq.get(
@@ -430,7 +438,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 		{
 			try
 			{
-				if (pi.getInPort() == 1)
+				if (pi.getInPort().getPortNumber() == 1)
 				{
 					LOG.info("Set state " + State.has_port_1.ordinal());
 					this.slq.set(this.nsID, State.has_port_1.ordinal(),
@@ -455,7 +463,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 		{
 			try
 			{
-				if (pi.getInPort() > 1)
+				if (pi.getInPort().getPortNumber() > 1)
 				{
 					// Don't set the state.
 					// The state only keeps a non-empty array for
@@ -474,13 +482,13 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 		{
 			try
 			{
-				if (pi.getInPort() == 1)
+				if (pi.getInPort().getPortNumber() == 1)
 				{
 					LOG.info("Set state " + State.has_port_1.ordinal());
 					this.slq.set(this.nsID, State.has_port_1.ordinal(),
 							typeSer.valueOf(true));
 				}
-				else if (pi.getInPort() == 2)
+				else if (pi.getInPort().getPortNumber() == 2)
 				{
 					LOG.info("Get state " + State.counter_port_2.ordinal());
 					int pkt_counter = typeDeser.toInteger(this.slq.get(
@@ -508,13 +516,13 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 		{
 			try
 			{
-				if (pi.getInPort() == 1)
+				if (pi.getInPort().getPortNumber() == 1)
 				{
 					LOG.info("Set state " + State.has_port_1.ordinal());
 					this.slq.set(this.nsID, State.has_port_1.ordinal(),
 							typeSer.valueOf(true));
 				}
-				else if (pi.getInPort() == 2)
+				else if (pi.getInPort().getPortNumber() == 2)
 				{
 					LOG.info("Get state " + State.counter_port_2.ordinal());
 					int pkt_counter = typeDeser.toInteger(this.slq.get(
@@ -564,7 +572,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 		{
 			try
 			{
-				if (pi.getInPort() == 1)
+				if (pi.getInPort().getPortNumber() == 1)
 				{
 					LOG.info("Set state " + State.has_port_1.ordinal());
 					this.slq.set(this.nsID, State.has_port_1.ordinal(),
@@ -610,7 +618,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 		{
 			try
 			{
-				if (pi.getInPort() == 1)
+				if (pi.getInPort().getPortNumber() == 1)
 				{
 					LOG.info("Set state " + State.has_port_1.ordinal());
 					this.slq.set(this.nsID, State.has_port_1.ordinal(),
@@ -643,7 +651,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
       LOG.debug("receive> Match on sw<{}>; {}", sw.getId(), pktMatch);
     }
 
-    final Long dstLong = Ethernet.toLong(pktMatch.getDataLayerDestination());
+    final MacAddress dstLong = pktMatch.getDataLayerDestination();
     if (dstLong.equals(Ethernet.toLong(MULTICAST_DNS))) {
       return Command.CONTINUE;
     }
@@ -655,16 +663,16 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
     {
     	return Command.CONTINUE;
     }
-    final Long sourceMACHash = Ethernet.toLong(eth.getSourceMACAddress());
+    final MacAddress srcMac = eth.getSourceMACAddress();
     if (dstLong.equals(Ethernet.toLong(FAKE_DST_ETH))) {
       // Emulating LLDP.
       if (LOG.isInfoEnabled()) {
         LOG.info("receive> pkt to fake dst; VLAN: {}  src: {}", eth.getVlanID(),
-                 HexString.toHexString(sourceMACHash));
+                 srcMac.toString());
       }
       // Received this packet (to a fake destination) from a real switch.
       // Use the ingress port on the switch and the switch ID to infer connectivity in the network.
-      String peerPortMac = HexString.toHexString(dstLong);
+      MacAddress peerPortMac = dstLong;
       if (!this.netTopo.addSwToSwLink(peerPortMac, sw.getId(), pi.getInPort())) {
         // Not a new link!
         this.knownMacs.add(peerPortMac);
@@ -678,10 +686,9 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
     }
 
     if (LOG.isDebugEnabled()) {
-      LOG.debug("receive> new pkt match from Sw<{}>!", sw.getStringId());
+      LOG.debug("receive> new pkt match from Sw<{}>!", sw.toString());
     }
 
-    final String srcMac = HexString.toHexString(sourceMACHash);
     this.addHostToSw(srcMac, sw.getId(), pi.getInPort());
 
     final OFMatch flowMatch = pktMatch.clone().setInputPort(Short.MAX_VALUE);
@@ -751,7 +758,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
      * @param sw Switch ID
      * @param port Port number
      */
-  private void addHostToSw(String host, long sw, short port) {
+  private void addHostToSw(MacAddress host, DatapathId sw, OFPort port) {
     //upon detecting a host connected to a switch, mark the switch as an edge
 
     if (this.hostMacToSwMap.containsKey(host)) {
@@ -769,14 +776,14 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   }
 
   @Override
-  public void switchAdded(long switchId) {
+  public void switchAdded(DatapathId switchId) {
     if (LOG.isInfoEnabled()) {
       LOG.info("switchAdded> Sw<{}>", switchId);
     }
   }
 
   @Override
-  public void switchRemoved(long switchId) {
+  public void switchRemoved(DatapathId switchId) {
     this.pathUtil.removeSw(switchId);
 
     if (LOG.isInfoEnabled()) {
@@ -785,7 +792,12 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   }
 
   @Override
-  public void switchActivated(long switchId) {
+  public void switchDeactivated(DatapathId switchId) {
+
+  }
+
+  @Override
+  public void switchActivated(DatapathId switchId) {
     this.netTopo.addSw(switchId);
     final IOFSwitch sw = this.flProvider.getSwitch(switchId);
     if(sw.getPorts() != null)
@@ -804,14 +816,14 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   }
 
   @Override
-  public void switchPortChanged(long switchId, ImmutablePort port, PortChangeType type) {
+  public void switchPortChanged(DatapathId switchId, OFPortDesc port, PortChangeType type) {
     if (LOG.isInfoEnabled()) {
       LOG.info("switchPortChanged> Sw<{}> {}", switchId, type);
     }
   }
 
   @Override
-  public void switchChanged(long switchId) {
+  public void switchChanged(DatapathId switchId) {
     if (LOG.isInfoEnabled()) {
       LOG.info("switchChanged> Sw<{}>", switchId);
     }
