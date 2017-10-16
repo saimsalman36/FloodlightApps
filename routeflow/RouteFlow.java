@@ -76,7 +76,6 @@ public class RouteFlow implements IFloodlightModule, IOFMessageListener, IOFSwit
                                                            RouteFlow.class.getCanonicalName()));
     private Recorder recorder;
 
-    protected IFloodlightProviderService flProvider;
     protected IOFSwitchService switchService;
     protected ILinkDiscoveryService      linkDiscoverySrvc;
 

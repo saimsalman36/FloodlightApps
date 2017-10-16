@@ -1,25 +1,44 @@
 
-package edu.duke.cs.legosdn.tests.apps.srf;
+package net.floodlightcontroller.srf;
 
-import edu.duke.cs.legosdn.core.Defaults;
-import edu.duke.cs.legosdn.core.log.FileRecorder;
-import edu.duke.cs.legosdn.core.log.NullRecorder;
-import edu.duke.cs.legosdn.core.log.Recorder;
+import net.floodlightcontroller.routeflow.Defaults;
+import net.floodlightcontroller.routeflow.FileRecorder;
+import net.floodlightcontroller.routeflow.NullRecorder;
+import net.floodlightcontroller.routeflow.Recorder;
+
 import net.floodlightcontroller.core.*;
 import net.floodlightcontroller.core.module.FloodlightModuleContext;
 import net.floodlightcontroller.core.module.FloodlightModuleException;
 import net.floodlightcontroller.core.module.IFloodlightModule;
 import net.floodlightcontroller.core.module.IFloodlightService;
+
+import net.floodlightcontroller.core.IOFSwitch;
+import net.floodlightcontroller.core.IOFSwitchListener;
+import net.floodlightcontroller.core.internal.IOFSwitchService;
+
 import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryListener;
 import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryService;
-import net.floodlightcontroller.linkdiscovery.LinkInfo;
+import net.floodlightcontroller.linkdiscovery.Link;
+import net.floodlightcontroller.linkdiscovery.internal.LinkInfo;
+
 import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.IPv4;
-import net.floodlightcontroller.routing.Link;
-import org.openflow.protocol.*;
-import org.openflow.protocol.action.OFAction;
-import org.openflow.protocol.action.OFActionOutput;
-import org.openflow.util.HexString;
+import org.projectfloodlight.openflow.types.IPv4Address;
+
+import org.projectfloodlight.openflow.protocol.*;
+import org.projectfloodlight.openflow.types.OFPort;
+import org.projectfloodlight.openflow.types.DatapathId;
+
+import org.projectfloodlight.openflow.protocol.OFFactory;
+import org.projectfloodlight.openflow.protocol.action.OFAction;
+import org.projectfloodlight.openflow.protocol.action.OFActions;
+import org.projectfloodlight.openflow.protocol.match.MatchField;
+import org.projectfloodlight.openflow.protocol.match.Match;
+import org.projectfloodlight.openflow.types.EthType;
+import org.projectfloodlight.openflow.types.OFBufferId;
+import org.projectfloodlight.openflow.protocol.OFFlowAdd;
+import org.projectfloodlight.openflow.protocol.action.OFActionOutput;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,27 +66,27 @@ public class StatelessRouteFlow
     public static final int UNKNOWN_NEXT_HOP = 0;
 
     private static final File NUM_RT_WR  = new File(String.format("%s/%s-num-rt-writes.txt",
-                                                                  Defaults.APP_LOGS_PATH,
+                                                                  "/home/saimsalman/OldFloodlight/floodlight_MASTER/src/main/java/net/floodlightcontroller/srf",
                                                                   StatelessRouteFlow.class.getCanonicalName()));
     private final File ROUTES_LOG = new File(String.format("%s/%s-routes.txt",
-                                                           Defaults.APP_LOGS_PATH,
+                                                           "/home/saimsalman/OldFloodlight/floodlight_MASTER/src/main/java/net/floodlightcontroller/srf",
                                                            StatelessRouteFlow.class.getCanonicalName()));
     private Recorder recorder;
 
-    protected IFloodlightProviderService flProvider;
+    protected IOFSwitchService switchService;
     protected ILinkDiscoveryService      linkDiscoverySrvc;
 
     protected final AtomicInteger               numSws;
-    protected final Set<Long>                   activeSws;
+    protected final Set<DatapathId>                   activeSws;
     // Mapping from host-ip to sw-port
-    protected final Map<Integer, Long>          hostToSw;
+    protected final Map<IPv4Address, DatapathId>          hostToSw;
     // Network links.
     protected final Map<Link, LinkInfo>         netwLinks;
 
     public StatelessRouteFlow() {
         this.numSws = new AtomicInteger(0);
-        this.activeSws = new HashSet<Long>(DEF_NUM_SWS);
-        this.hostToSw = new HashMap<Integer, Long>(DEF_NUM_SWS);
+        this.activeSws = new HashSet<DatapathId>(DEF_NUM_SWS);
+        this.hostToSw = new HashMap<IPv4Address, DatapathId>(DEF_NUM_SWS);
         this.netwLinks = new HashMap<Link, LinkInfo>(DEF_NUM_LINKS);
 
         if (!NUM_RT_WR.exists()) {
@@ -101,11 +120,14 @@ public class StatelessRouteFlow
         final Collection<Class<? extends IFloodlightService>> deps =
                 new ArrayList<Class<? extends IFloodlightService>>(1);
         deps.add(IFloodlightProviderService.class);
+        deps.add(IOFSwitchService.class);
+        deps.add(ILinkDiscoveryService.class);
         return deps;
     }
 
     @Override
     public void init(FloodlightModuleContext context) throws FloodlightModuleException {
+        this.switchService = context.getServiceImpl(IOFSwitchService.class);
         final Map<String, String> modConf = context.getConfigParams(this);
 
         final boolean enableMLog =
@@ -122,8 +144,6 @@ public class StatelessRouteFlow
             throw new RuntimeException("No value for configuration parameter 'host_to_sw_mappings'!");
         }
         this.loadHostToSwMappings(hostToSwMapFile);
-
-        this.flProvider = context.getServiceImpl(IFloodlightProviderService.class);
         this.linkDiscoverySrvc = context.getServiceImpl(ILinkDiscoveryService.class);
 
         if (logger.isDebugEnabled()) {
@@ -133,7 +153,7 @@ public class StatelessRouteFlow
 
     @Override
     public void startUp(FloodlightModuleContext context) throws FloodlightModuleException {
-        this.flProvider.addOFSwitchListener(this);
+        switchService.addOFSwitchListener(this);
         this.linkDiscoverySrvc.addListener(this);
 
         if (logger.isDebugEnabled()) {
@@ -157,18 +177,18 @@ public class StatelessRouteFlow
     }
 
     @Override
-    public void switchAdded(long switchId) {
+    public void switchAdded(DatapathId switchId) {
         final int numSws = this.numSws.incrementAndGet();
         final int numActiveSws = this.activeSws.size();
 
         if (logger.isTraceEnabled()) {
-            logger.trace(String.format("switchAdded> [%d] %s; #switches: %d, #active: %d",
-                                       switchId, Long.toHexString(switchId), numSws, numActiveSws));
+            logger.trace(String.format("switchAdded> %s; #switches: %d, #active: %d",
+                                       switchId.toString(), numSws, numActiveSws));
         }
     }
 
     @Override
-    public void switchRemoved(long switchId) {
+    public void switchRemoved(DatapathId switchId) {
         synchronized (this.activeSws) {
             this.activeSws.remove(switchId);
         }
@@ -176,11 +196,11 @@ public class StatelessRouteFlow
         final int numSws = this.numSws.decrementAndGet();
 
         if (logger.isTraceEnabled()) {
-            logger.trace(String.format("switchRemoved> [%d] %s; #switches: %d, #active: %s",
-                                       switchId, Long.toHexString(switchId), numSws, numActiveSws));
+            logger.trace(String.format("switchRemoved> %s; #switches: %d, #active: %s",
+                                       switchId.toString(), numSws, numActiveSws));
         }
 
-        this.recorder.logInMsg(String.format("Sw-%d removed.", switchId), ROUTES_LOG);
+        this.recorder.logInMsg(String.format("Sw-%s removed.", switchId.toString()), ROUTES_LOG);
 
         synchronized (this.activeSws) {
             if (this.processLinkUpdates(this.linkDiscoverySrvc.getLinks())) {
@@ -190,7 +210,12 @@ public class StatelessRouteFlow
     }
 
     @Override
-    public void switchActivated(long switchId) {
+    public void switchDeactivated(DatapathId switchId) {
+
+    }
+
+    @Override
+    public void switchActivated(DatapathId switchId) {
         synchronized (this.activeSws) {
             this.activeSws.add(switchId);
             this.floodARP(switchId);
@@ -199,11 +224,11 @@ public class StatelessRouteFlow
         final int numSws = this.numSws.get();
 
         if (logger.isTraceEnabled()) {
-            logger.trace(String.format("switchActivated> [%d] %s; #switches: %d, #active: %d",
-                                       switchId, Long.toHexString(switchId), numSws, numActiveSws));
+            logger.trace(String.format("switchActivated> %s; #switches: %d, #active: %d",
+                                       switchId.toString(), numSws, numActiveSws));
         }
 
-        this.recorder.logInMsg(String.format("Sw-%d activated.", switchId), ROUTES_LOG);
+        this.recorder.logInMsg(String.format("Sw-%s activated.", switchId.toString()), ROUTES_LOG);
 
         synchronized (this.activeSws) {
             if (this.processLinkUpdates(this.linkDiscoverySrvc.getLinks())) {
@@ -213,14 +238,14 @@ public class StatelessRouteFlow
     }
 
     @Override
-    public void switchPortChanged(long switchId, ImmutablePort port, IOFSwitch.PortChangeType type) {
+    public void switchPortChanged(DatapathId switchId, OFPortDesc port, PortChangeType type) {
         if (logger.isTraceEnabled()) {
-            logger.trace(String.format("switchPortChanged> [%d] %s: %s (%s)",
-                                       switchId, Long.toHexString(switchId), port.toString(), type.toString()));
+            logger.trace(String.format("switchPortChanged> %s: %s (%s)",
+                                       switchId.toString(), port.toString(), type.toString()));
         }
 
-        this.recorder.logInMsg(String.format("Sw-%d:%d %s.",
-                                             switchId, port.getPortNumber(), type.toString()),
+        this.recorder.logInMsg(String.format("Sw-%s:%s %s.",
+                                             switchId, port.toString(), type.toString()),
                                ROUTES_LOG);
 
         synchronized (this.activeSws) {
@@ -231,16 +256,16 @@ public class StatelessRouteFlow
     }
 
     @Override
-    public void switchChanged(long switchId) {
+    public void switchChanged(DatapathId switchId) {
         if (logger.isTraceEnabled()) {
-            logger.trace(String.format("switchChanged> [%d] %s", switchId, Long.toHexString(switchId)));
+            logger.trace(String.format("switchChanged> %s", switchId.toString()));
         }
     }
 
     @Override
     public Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
         if (logger.isTraceEnabled()) {
-            logger.trace(String.format("receive> %s => %s", sw.getStringId(), msg.getType()));
+            logger.trace(String.format("receive> %s => %s", sw.toString(), msg.getType()));
         }
         return Command.CONTINUE;
     }
@@ -320,31 +345,32 @@ public class StatelessRouteFlow
         return true;
     }
 
-    @Override
-    public void linkDiscoveryUpdate(LDUpdate update) {
-        if (logger.isTraceEnabled()) {
-            logger.trace(String.format("linkDiscoveryUpdate> (%s) %s - src: %d => dst: %d",
-                                       update.getType().toString(),
-                                       update.getOperation().toString(),
-                                       update.getSrc(),
-                                       update.getDst()));
-        }
+    // TODO: Fix This!
+    // @Override
+    // public void linkDiscoveryUpdate(LDUpdate update) {
+    //     if (logger.isTraceEnabled()) {
+    //         logger.trace(String.format("linkDiscoveryUpdate> (%s) %s - src: %d => dst: %d",
+    //                                    update.getType().toString(),
+    //                                    update.getOperation().toString(),
+    //                                    update.getSrc(),
+    //                                    update.getDst()));
+    //     }
 
-        this.recorder.logInMsg(String.format("LDUpdate %s %s Sw-%d:%d Sw-%d:%d",
-                                             update.getOperation().toString(),
-                                             update.getType().toString(),
-                                             update.getSrc(),
-                                             update.getSrcPort(),
-                                             update.getDst(),
-                                             update.getDstPort()),
-                               ROUTES_LOG);
+    //     this.recorder.logInMsg(String.format("LDUpdate %s %s Sw-%d:%d Sw-%d:%d",
+    //                                          update.getOperation().toString(),
+    //                                          update.getType().toString(),
+    //                                          update.getSrc(),
+    //                                          update.getSrcPort(),
+    //                                          update.getDst(),
+    //                                          update.getDstPort()),
+    //                            ROUTES_LOG);
 
-        synchronized (this.activeSws) {
-            if (this.processLinkUpdates(this.linkDiscoverySrvc.getLinks())) {
-                this.computeRoutes(this.netwLinks);
-            }
-        }
-    }
+    //     synchronized (this.activeSws) {
+    //         if (this.processLinkUpdates(this.linkDiscoverySrvc.getLinks())) {
+    //             this.computeRoutes(this.netwLinks);
+    //         }
+    //     }
+    // }
 
     @Override
     public void linkDiscoveryUpdate(List<LDUpdate> updateList) {
@@ -364,14 +390,14 @@ public class StatelessRouteFlow
 
     public static final class LinkEnds {
 
-        public final long src;
-        public final long dst;
+        public final DatapathId src;
+        public final DatapathId dst;
         private final int hashCode;
 
-        public LinkEnds(long src, long dst) {
+        public LinkEnds(DatapathId src, DatapathId dst) {
             this.src = src;
             this.dst = dst;
-            this.hashCode = String.format("%d,%d", this.src, this.dst).hashCode();
+            this.hashCode = String.format("%s,%s", this.src, this.dst).hashCode();
         }
 
         @Override
@@ -402,18 +428,18 @@ public class StatelessRouteFlow
             logger.trace(String.format("computeRoutes> #links: %d", nwLinks.size()));
         }
 
-        final Map<LinkEnds, Short> linkDetails = new HashMap<LinkEnds, Short>(DEF_NUM_LINKS);
+        final Map<LinkEnds, OFPort> linkDetails = new HashMap<LinkEnds, OFPort>(DEF_NUM_LINKS);
         for (Map.Entry<Link, LinkInfo> linkEntry : nwLinks.entrySet()) {
             final Link link = linkEntry.getKey();
-            final short srcPort = link.getSrcPort();
+            final OFPort srcPort = link.getSrcPort();
             final LinkEnds le = new LinkEnds(link.getSrc(), link.getDst());
             linkDetails.put(le, srcPort);
 
             if (logger.isDebugEnabled()) {
-                logger.debug(String.format("computeRoutes> link: %d:%d => %d", le.src, srcPort, le.dst));
+                logger.debug(String.format("computeRoutes> link: %s:%s => %s", le.src.toString(), srcPort.toString(), le.dst.toString()));
             }
         }
-        final Map<Long, Map<Long, Long>> routes = this.calcShortestPaths(linkDetails.keySet());
+        final Map<DatapathId, Map<DatapathId, DatapathId>> routes = this.calcShortestPaths(linkDetails.keySet());
         this.setupRoutes(routes, linkDetails);
     }
 
@@ -442,20 +468,20 @@ public class StatelessRouteFlow
      * @param links Set of known switch links
      * @return Shortest routes between switches
      */
-    protected Map<Long, Map<Long, Long>> calcShortestPaths(Set<LinkEnds> links) {
+    protected Map<DatapathId, Map<DatapathId, DatapathId>> calcShortestPaths(Set<LinkEnds> links) {
         final int N;
         // Switch IDs to array indices.
-        final Map<Long, Integer> swToIndex;
-        final long[] swIDs;
+        final Map<DatapathId, Integer> swToIndex;
+        final DatapathId[] swIDs;
         synchronized (this.activeSws) {
             N = this.activeSws.size();
 
-            swToIndex = new HashMap<Long, Integer>(N);
-            swIDs = new long[N];
+            swToIndex = new HashMap<DatapathId, Integer>(N);
+            swIDs = new DatapathId[N];
 
             // Map switches IDs to array indices.
             int index = 0;
-            for (Long sw : this.activeSws) {
+            for (DatapathId sw : this.activeSws) {
                 swToIndex.put(sw, index);
                 swIDs[index] = sw;
                 index++;
@@ -524,12 +550,12 @@ public class StatelessRouteFlow
         }
 
         int numRoutes = 0;
-        final Map<Long, Map<Long, Long>> routes = new HashMap<Long, Map<Long, Long>>(DEF_NUM_SWS);
+        final Map<DatapathId, Map<DatapathId, DatapathId>> routes = new HashMap<DatapathId, Map<DatapathId, DatapathId>>(DEF_NUM_SWS);
         for (int u = 0; u < N; u++) {
             for (int v = 0; v < N; v++) {
-                final Long src = swIDs[u];
-                final Long dst = swIDs[v];
-                final Long nxt = swIDs[nextHop[u][v]];
+                final DatapathId src = swIDs[u];
+                final DatapathId dst = swIDs[v];
+                final DatapathId nxt = swIDs[nextHop[u][v]];
 
                 if (distance[u][v] == UNKNOWN_DIST) {
                     continue;
@@ -541,7 +567,7 @@ public class StatelessRouteFlow
                 }
 
                 if (!routes.containsKey(src)) {
-                    routes.put(src, new HashMap<Long, Long>(DEF_NUM_SWS));
+                    routes.put(src, new HashMap<DatapathId, DatapathId>(DEF_NUM_SWS));
                 }
                 routes.get(src).put(dst, nxt);
                 numRoutes++;
@@ -566,22 +592,22 @@ public class StatelessRouteFlow
      * @param routes Next hop matrix
      * @param links Known links in the network
      */
-    protected void setupRoutes(final Map<Long, Map<Long, Long>> routes, Map<LinkEnds, Short> links) {
+    protected void setupRoutes(final Map<DatapathId, Map<DatapathId, DatapathId>> routes, Map<LinkEnds, OFPort> links) {
         int numWr = 0;
         synchronized (this.activeSws) {
-            List<Integer> hosts = new ArrayList<Integer>(this.hostToSw.keySet());
+            List<IPv4Address> hosts = new ArrayList<IPv4Address>(this.hostToSw.keySet());
             Collections.sort(hosts);
-            for (Integer host : hosts) {
+            for (IPv4Address host : hosts) {
                 // Switch to which the host is connected to.
-                final Long dst = this.hostToSw.get(host);
+                final DatapathId dst = this.hostToSw.get(host);
 
                 // Establish at each switch the route to reach the different hosts.
-                List<Long> sws = new ArrayList<Long>(this.activeSws);
+                List<DatapathId> sws = new ArrayList<DatapathId>(this.activeSws);
                 Collections.sort(sws);
-                for (Long src : sws) {
-                    final short outPort;
+                for (DatapathId src : sws) {
+                    final OFPort outPort;
                     if (src.equals(dst)) {
-                        outPort = SW_HOST_PORT;
+                        outPort = OFPort.of(SW_HOST_PORT);
                     } else {
                         if (!routes.containsKey(src)) {
                             // We do not know the routes to this switch, yet!
@@ -594,7 +620,7 @@ public class StatelessRouteFlow
                         }
 
                         // Next hop towards the destination
-                        final Long nxt = routes.get(src).get(dst);
+                        final DatapathId nxt = routes.get(src).get(dst);
 
                         final LinkEnds le = new LinkEnds(src, nxt);
                         outPort = links.get(le);
@@ -604,7 +630,7 @@ public class StatelessRouteFlow
                         logger.debug(String.format("setupRoutes> Use port %d on %d to go to %d", outPort, src, dst));
                     }
 
-                    this.writeRoute(host, src, outPort, (short) 0);
+                    this.writeRoute(host, src, outPort, 0);
                     numWr++;
                 }
             }
@@ -643,45 +669,39 @@ public class StatelessRouteFlow
      * @param outPort Output port on the switch through which flows will be routed towards the host
      * @param prio Rule priority
      */
-    protected void writeRoute(Integer host, Long sw, short outPort, short prio) {
-        final OFMatch ofMatch = new OFMatch();
-        ofMatch.setNetworkDestination(host);
-        ofMatch.setDataLayerType(Ethernet.TYPE_IPv4);
-        // For setting up a rule to only allow ICMP protocol.
-//        ofMatch.setWildcards(Wildcards.FULL
-//                                     .matchOn(Wildcards.Flag.NW_DST)
-//                                     .matchOn(Wildcards.Flag.DL_TYPE)
-//                                     .matchOn(Wildcards.Flag.NW_PROTO)
-//                                     .withNwDstMask(32));
-//        ofMatch.setNetworkProtocol(IPv4.PROTOCOL_ICMP);
-        // For setting up a rule to allow all protocols.
-        ofMatch.setWildcards(Wildcards.FULL
-                                     .matchOn(Wildcards.Flag.NW_DST)
-                                     .matchOn(Wildcards.Flag.DL_TYPE)
-                                     .withNwDstMask(32));
 
-        final OFActionOutput action = new OFActionOutput();
-        action.setPort(outPort);
+    protected void writeRoute(IPv4Address host, DatapathId swID, OFPort outPort, int prio) {
+        IOFSwitch sw = switchService.getActiveSwitch(swID);
+        OFFactory myFactory = sw.getOFFactory();
 
-        final OFFlowMod ofFlowMod = (OFFlowMod) this.flProvider.getOFMessageFactory().getMessage(OFType.FLOW_MOD);
-        ofFlowMod.setCommand(OFFlowMod.OFPFC_ADD);
-        ofFlowMod.setActions(Collections.singletonList((OFAction) action));
-        ofFlowMod.setMatch(ofMatch);
-        ofFlowMod.setBufferId(OFPacketOut.BUFFER_ID_NONE);
-        ofFlowMod.setLength((short) (OFFlowMod.MINIMUM_LENGTH + OFActionOutput.MINIMUM_LENGTH));
-        ofFlowMod.setPriority(prio);
+    // set actions
+        ArrayList<OFAction> actionList = new ArrayList<OFAction>();
+        OFActions actions = myFactory.actions();
 
-        try {
-            final IOFSwitch iofSwitch = this.flProvider.getSwitch(sw);
-            iofSwitch.write(ofFlowMod, null);
-            iofSwitch.flush();
-        } catch (IOException e) {
-            logger.error(String.format("writeRoute> failed to write route! %s", e.getLocalizedMessage()));
-            e.printStackTrace();
-        }
+    //set forward translation
+        Match match = myFactory.buildMatch()
+        .setExact(MatchField.ETH_TYPE, EthType.IPv4)
+        .setExact(MatchField.IPV4_DST, host)
+        .build();
 
-        this.recorder.logOutMsg(String.format("Sw-%d:%d => %s ",
-                                              sw, outPort, IPv4.fromIPv4Address(host)),
+        actionList.clear();
+        OFActionOutput action = actions.buildOutput()
+            .setPort(outPort)
+            .build();
+        actionList.add( action );
+        // actionList.add(sw.getOFFactory().actions().setOutport(outPort));
+
+        OFFlowAdd flowAdd = myFactory.buildFlowAdd()
+        .setBufferId(OFBufferId.NO_BUFFER)
+        .setMatch(match)
+        .setPriority(prio)
+        .setActions(actionList)
+        .build();
+
+        sw.write(flowAdd);
+
+        this.recorder.logOutMsg(String.format("Sw-%s:%s => %s ",
+                                              sw.toString(), outPort.toString(), host),
                                 ROUTES_LOG);
     }
 
@@ -706,8 +726,8 @@ public class StatelessRouteFlow
 
                 // <host IP>, <switch address>
                 final String[] parts = data.split("\\s*,\\s*");
-                final Integer host = IPv4.toIPv4Address(parts[0]);
-                final Long sw = HexString.toLong(parts[1]);
+                final IPv4Address host = IPv4Address.of(parts[0]);
+                final DatapathId sw = DatapathId.of(parts[1]);
                 this.hostToSw.put(host, sw);
             }
 
@@ -742,33 +762,36 @@ public class StatelessRouteFlow
      *
      * @param sw Switch ID
      */
-    private void floodARP(long sw) {
+    private void floodARP(DatapathId swID) {
         if (logger.isDebugEnabled()) {
-            logger.debug(String.format("floodARP> flood ARP for %d", sw));
+            logger.debug(String.format("floodARP> flood ARP for %s", swID.toString()));
         }
 
-        final OFMatch ofMatch = new OFMatch().setDataLayerType(Ethernet.TYPE_ARP);
-        ofMatch.setWildcards(Wildcards.FULL.matchOn(Wildcards.Flag.DL_TYPE));
+        IOFSwitch sw = switchService.getActiveSwitch(swID);
+        OFFactory myFactory = sw.getOFFactory();
 
-        final OFActionOutput ofActionOut = new OFActionOutput().setPort(OFPort.OFPP_FLOOD.getValue());
+    // set actions
+        ArrayList<OFAction> actionList = new ArrayList<OFAction>();
+        OFActions actions = myFactory.actions();
 
-        final OFFlowMod ofFlowMod = (OFFlowMod) this.flProvider
-                .getOFMessageFactory()
-                .getMessage(OFType.FLOW_MOD);
-        ofFlowMod.setCommand(OFFlowMod.OFPFC_ADD);
-        ofFlowMod.setMatch(ofMatch);
-        ofFlowMod.setActions(Collections.singletonList((OFAction) ofActionOut));
-        ofFlowMod.setLength((short) (OFActionOutput.MINIMUM_LENGTH + OFFlowMod.MINIMUM_LENGTH));
-        ofFlowMod.setBufferId(OFPacketOut.BUFFER_ID_NONE);
+    //set forward translation
+        Match match = myFactory.buildMatch()
+        .setExact(MatchField.ETH_TYPE, EthType.ARP)
+        // .setExact(MatchField.IPV4_DST, host)
+        .build();
 
-        try {
-            final IOFSwitch iofSwitch = this.flProvider.getSwitch(sw);
-            iofSwitch.write(ofFlowMod, null);
-            iofSwitch.flush();
-        } catch (IOException e) {
-            logger.error(String.format("floodARP> failed to setup rule! %s", e.getLocalizedMessage()));
-            e.printStackTrace();
-        }
+        actionList.clear();
+        OFActionOutput action = actions.buildOutput()
+            .setPort(OFPort.FLOOD)
+            .build();
+        actionList.add( action );
+
+        OFFlowAdd flowAdd = myFactory.buildFlowAdd()
+        .setBufferId(OFBufferId.NO_BUFFER)
+        .setMatch(match)
+        .setActions(actionList)
+        .build();
+
+        sw.write(flowAdd);
     }
-
 }
