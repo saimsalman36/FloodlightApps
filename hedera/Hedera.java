@@ -1,14 +1,14 @@
 package net.floodlightcontroller.hedera;
 
-import edu.duke.cs.legosdn.core.Defaults;
-import edu.duke.cs.legosdn.core.cache.IMsgMaskCli;
-import edu.duke.cs.legosdn.core.state.NSQuery;
-import edu.duke.cs.legosdn.core.state.StateLayerAwareApp;
-import edu.duke.cs.legosdn.core.state.StateLayerQuery;
-import edu.duke.cs.legosdn.core.state.TypeDeserializers;
-import edu.duke.cs.legosdn.core.state.TypeSerializers;
-import edu.duke.cs.legosdn.core.state.faults.NoActiveTransactionFault;
-import edu.duke.cs.legosdn.core.util.Util;
+// import edu.duke.cs.legosdn.core.Defaults;
+// import edu.duke.cs.legosdn.core.cache.IMsgMaskCli;
+// import edu.duke.cs.legosdn.core.state.NSQuery;
+// import edu.duke.cs.legosdn.core.state.StateLayerAwareApp;
+// import edu.duke.cs.legosdn.core.state.StateLayerQuery;
+// import edu.duke.cs.legosdn.core.state.TypeDeserializers;
+// import edu.duke.cs.legosdn.core.state.TypeSerializers;
+// import edu.duke.cs.legosdn.core.state.faults.NoActiveTransactionFault;
+// import edu.duke.cs.legosdn.core.util.Util;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -93,6 +93,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   
 	protected static final TypeSerializers typeSer;
 	protected static final TypeDeserializers typeDeser;
+	protected IOFSwitchService switchService;
 
 	static
 	{
@@ -256,8 +257,6 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   //
   // ---<[ Application State ]>---
 
-  private IFloodlightProviderService flProvider;
-
   public Hedera() {
     this.netTopo = new NetTopo();
     this.knownMacs = new ConcurrentSkipListSet<>();
@@ -309,13 +308,15 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
     final Collection<Class<? extends IFloodlightService>> deps =
         new ArrayList<Class<? extends IFloodlightService>>(1);
     deps.add(IFloodlightProviderService.class);
+    deps.add(IOFSwitchService.class);
     return deps;
   }
 
   @Override
   public void init(FloodlightModuleContext context) throws FloodlightModuleException {
-    this.flProvider = context.getServiceImpl(IFloodlightProviderService.class);
-    this.pathUtil.init(this.flProvider);
+    // this.flProvider = context.getServiceImpl(IFloodlightProviderService.class);
+    this.switchService = context.getServiceImpl(IOFSwitchService.class);
+    this.pathUtil.init(this.switchService);
     final Map<String, String> configParams = context.getConfigParams(this);
     try {
     	Hedera.elephantRate = Double.parseDouble(configParams.get("elephant.rate"));
@@ -329,11 +330,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 
   @Override
   public void startUp(FloodlightModuleContext context) throws FloodlightModuleException {
-    this.flProvider.addOFMessageListener(OFType.PACKET_IN, this);
-
-    // NOTE: It is important to subscribe to OFStatisticsReply messages!
-    //  AppVisor, otherwise, will have no clue that the app. is interested in the message.
-    this.flProvider.addOFMessageListener(OFType.STATS_REPLY, this);
+  	switchService.addOFSwitchListener(this);
     
 	try
 	{
@@ -400,7 +397,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
    * @param cntx Floodlight context
    * @return CONTINUE or STOP
    */
-  private Command handlePacketIn(IOFSwitch sw, OFPacketIn pi, FloodlightContext cntx) {
+  private Command handlePacketIn(IOFSwitch swID, OFPacketIn pi, FloodlightContext cntx) {
 		if (BUG == 1)
 		{
 			try
@@ -540,28 +537,20 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 					if (pkt_counter == 2)
 						if (has_port_1)
 						{
-							OFFlowMod flowMod = (OFFlowMod) flProvider
-									.getOFMessageFactory().getMessage(
-											OFType.FLOW_MOD);
-							flowMod.setCommand(OFFlowMod.OFPFC_ADD);
-							// no action for dropping
-							ArrayList<OFAction> actions = new ArrayList<OFAction>();
-							OFMatch match_bug = new OFMatch();
-							match_bug.setWildcards(Wildcards.FULL);
-							flowMod.setMatch(match_bug);
-							flowMod.setActions(actions);
-							flowMod.setLength((short) (OFFlowMod.MINIMUM_LENGTH + OFActionOutput.MINIMUM_LENGTH));
-							flowMod.setBufferId(OFPacketOut.BUFFER_ID_NONE);
+							IOFSwitch sw = switchService.getActiveSwitch(swID);
+							OFFactory myFactory = sw.getOFFactory();
+							ArrayList<OFAction> actionList = new ArrayList<OFAction>();
 
-							try
-							{
-								sw.write(flowMod, null);
-								sw.flush();
-								System.out.println("Installed!!!!");
-							} catch (IOException e)
-							{
-								LOG.error("zzy: Failure flowMod", e);
-							}
+							Match match = myFactory.buildMatch()
+							.build();
+
+							OFFlowAdd flowAdd = myFactory.buildFlowAdd()
+					        .setBufferId(OFBufferId.NO_BUFFER)
+					        .setMatch(match)
+					        .setActions(actionList)
+					        .build();
+
+					        sw.write(buildFlowAdd);
 						}
 				}
 			} catch (NoActiveTransactionFault e) // zzy: do nothing now
@@ -799,7 +788,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
   @Override
   public void switchActivated(DatapathId switchId) {
     this.netTopo.addSw(switchId);
-    final IOFSwitch sw = this.flProvider.getSwitch(switchId);
+    final IOFSwitch sw = switchService.getActiveSwitch(switchId);
     if(sw.getPorts() != null)
     {
       for(ImmutablePort port : sw.getPorts()) {
@@ -829,13 +818,13 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
     }
   }
 
-  @Override
-  public void linkDiscoveryUpdate(LDUpdate update) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug(String.format("linkDiscoveryUpdate> %s  src: %d  dst: %d", update.getType(),
-                              update.getSrc(), update.getDst()));
-    }
-  }
+  // @Override
+  // public void linkDiscoveryUpdate(LDUpdate update) {
+  //   if (LOG.isDebugEnabled()) {
+  //     LOG.debug(String.format("linkDiscoveryUpdate> %s  src: %d  dst: %d", update.getType(),
+  //                             update.getSrc(), update.getDst()));
+  //   }
+  // }
 
   @Override
   public void linkDiscoveryUpdate(List<LDUpdate> updateList) {
@@ -856,10 +845,10 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
       lastRuntime = currTime;
     }
 
-    final Map<Long, Long> totalBytesFromSrc =
-        new HashMap<Long, Long>(DEF_NUM_SWS);
-    final Map<Long, Map<Long, Long>> flowByteCounts =
-        new HashMap<Long, Map<Long, Long>>(DEF_NUM_SWS);
+    final Map<DatapathId, Long> totalBytesFromSrc =
+        new HashMap<DatapathId, Long>(DEF_NUM_SWS);
+    final Map<DatapathId, Map<DatapathId, Long>> flowByteCounts =
+        new HashMap<DatapathId, Map<DatapathId, Long>>(DEF_NUM_SWS);
 
     for (String srcMAC : this.perFlowStats.keySet()) {
       final ConcurrentMap<String, FlowStatsWrapper> dstFlowStats = this.perFlowStats.get(srcMAC);
@@ -868,15 +857,15 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
         final FlowStatsWrapper fStats = dstFlowStats.get(dstMAC);
         final long bytes = fStats.bytes;
 
-        final long srcSwId = this.hostMacToSwMap.get(srcMAC);
-        final long dstSwId = this.hostMacToSwMap.get(dstMAC);
+        final DatapathId srcSwId = this.hostMacToSwMap.get(srcMAC);
+        final DatapathId dstSwId = this.hostMacToSwMap.get(dstMAC);
 
         this.demandEst.setEntryMatchCount(srcSwId, dstSwId,
                                           fStats.match.setInputPort(Short.MAX_VALUE), fStats.bytes);
 
         if (!flowByteCounts.containsKey(srcSwId)) {
           // No byte counts for either the src or the dst!
-          Map<Long, Long> bytesToDst = new HashMap<Long, Long>();
+          Map<DatapathId, Long> bytesToDst = new HashMap<DatapathId, Long>();
           bytesToDst.put(dstSwId, bytes);
           flowByteCounts.put(srcSwId, bytesToDst);
         } else {
@@ -902,8 +891,8 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
 
     if (LOG.isDebugEnabled()) {
       final StringBuilder buf = new StringBuilder("");
-      for (long src : flowByteCounts.keySet()) {
-        for (long dst : flowByteCounts.get(src).keySet()) {
+      for (DatapathId src : flowByteCounts.keySet()) {
+        for (DatapathId dst : flowByteCounts.get(src).keySet()) {
           buf.append("  >> ");
           buf.append(src);
           buf.append(" -> ");
@@ -914,7 +903,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
         }
       }
       buf.append("\n");
-      for (long src : totalBytesFromSrc.keySet()) {
+      for (DatapathId src : totalBytesFromSrc.keySet()) {
         buf.append("  >> ");
         buf.append(src);
         buf.append("  - ");
@@ -924,9 +913,9 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
       LOG.debug("loadBalanceFlows> {}", buf.toString());
     }
 
-    for (long srcSwId : flowByteCounts.keySet()) {
-      final Map<Long, Long> dstMap = flowByteCounts.get(srcSwId);
-      for (long dstSwId : dstMap.keySet()) {
+    for (DatapathId srcSwId : flowByteCounts.keySet()) {
+      final Map<DatapathId, Long> dstMap = flowByteCounts.get(srcSwId);
+      for (DatapathId dstSwId : dstMap.keySet()) {
         if (totalBytesFromSrc.get(srcSwId) == 0) {
           if (LOG.isWarnEnabled()) {
             LOG.warn("loadBalanceFlows> invalid data; %d => %d = 0", srcSwId, dstSwId);
@@ -1104,7 +1093,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
    * @param mac Host's MAC address
    * @return Switch ID
    */
-  private Long getSwByHostMac(String mac) {
+  private DatapathId getSwByHostMac(String mac) {
     if (!this.hostMacToSwMap.containsKey(mac)) {
       return null;
     }
@@ -1166,7 +1155,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
       //  Assuming Mimir writes it out to the network, we will do the same here.
       //  In any case, we do not want to route the flow over the old path in the network.
       try {
-        final IOFSwitch sw = this.flProvider.getSwitch(dpid);
+        final IOFSwitch sw = this.switchService.getActiveSwitch(dpid);
         sw.write(flowMod, null);
         // 'flush' can be costly, if writes are frequent!
         sw.flush();
@@ -1199,7 +1188,7 @@ public class Hedera implements IFloodlightModule, IOFMessageListener, IOFSwitchL
                                       OFPacketOut.BUFFER_ID_NONE);
 
       try {
-        final IOFSwitch sw = this.flProvider.getSwitch(dpid);
+        final IOFSwitch sw = this.switchService.getActiveSwitch(dpid);
         sw.write(flowMod, null);
         // 'flush' can be costly, if writes are frequent!
         sw.flush();
